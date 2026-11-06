@@ -1473,13 +1473,35 @@ const { WebSocketServer } = require('ws');
 let MsEdgeTTS, OUTPUT_FORMAT;
 try {
   ({ MsEdgeTTS, OUTPUT_FORMAT } = require('msedge-tts'));
-} catch (e) {}
+} catch (e) {
+  console.warn('[CẢNH BÁO] Không tải được msedge-tts, sẽ dùng Google TTS.');
+}
 
+// Không để lỗi bất ngờ làm sập server mà không có thông báo
+process.on('unhandledRejection', err => console.error('[UNHANDLED REJECTION]', err?.message || err));
+process.on('uncaughtException', err => console.error('[UNCAUGHT EXCEPTION]', err?.message || err));
+
+// ================== CẤU HÌNH ==================
+const TIKTOK_USERNAME = "hienmetapduongsinh";
+const HTTP_PORT = 3000;
+const WS_PORT = 8080;
+const RECONNECT_DELAY_MS = 8000;
+const LOG_LIKES = true; // đặt false nếu like quá dày làm rối màn hình CMD
+
+// ================== SERVER TTS ==================
 const app = express();
 app.use(cors());
 
 const ttsCache = new Map();
 const MAX_TTS_CACHE = 180;
+
+function saveToCache(key, buf) {
+  if (ttsCache.size >= MAX_TTS_CACHE) {
+    const firstKey = ttsCache.keys().next().value;
+    if (firstKey) ttsCache.delete(firstKey);
+  }
+  ttsCache.set(key, buf);
+}
 
 async function fetchGoogleMirrorBuffer(text, voiceVariant) {
   const isSlow = voiceVariant === 'google-vi-slow';
@@ -1520,11 +1542,7 @@ app.get('/tts', async (req, res) => {
 
     if (voice.startsWith('google-') || !MsEdgeTTS) {
       const buf = await fetchGoogleMirrorBuffer(text, voice);
-      if (ttsCache.size >= MAX_TTS_CACHE) {
-        const firstKey = ttsCache.keys().next().value;
-        if (firstKey) ttsCache.delete(firstKey);
-      }
-      ttsCache.set(cacheKey, buf);
+      saveToCache(cacheKey, buf);
       res.setHeader('Content-Type', 'audio/mpeg');
       res.setHeader('Cache-Control', 'public, max-age=86400');
       return res.send(buf);
@@ -1539,25 +1557,26 @@ app.get('/tts', async (req, res) => {
     readable.on('data', chunk => chunks.push(Buffer.from(chunk)));
     readable.on('end', () => {
       const fullBuf = Buffer.concat(chunks);
-      if (fullBuf.length > 128) {
-        if (ttsCache.size >= MAX_TTS_CACHE) {
-          const firstKey = ttsCache.keys().next().value;
-          if (firstKey) ttsCache.delete(firstKey);
-        }
-        ttsCache.set(cacheKey, fullBuf);
-      }
+      if (fullBuf.length > 128) saveToCache(cacheKey, fullBuf);
+    });
+    readable.on('error', err => {
+      console.error('[LỖI EDGE TTS]', err?.message || err);
+      if (!res.headersSent) res.status(500).end();
+      else res.end();
     });
     readable.pipe(res);
   } catch (err) {
-    res.status(500).end();
+    console.error('[LỖI TTS]', err?.message || err);
+    if (!res.headersSent) res.status(500).end();
+    else res.end();
   }
 });
 
-app.listen(3000, () => console.log('Server TTS Lớp Học đang chạy tại: http://localhost:3000/tts'));
+app.listen(HTTP_PORT, () => console.log(\`Server TTS Lớp Học đang chạy tại: http://localhost:\${HTTP_PORT}/tts\`));
 
-const TIKTOK_USERNAME = "ten_id_tiktok_cua_ban";
-const wss = new WebSocketServer({ port: 8080, maxPayload: 100 * 1024 * 1024 });
-const tiktok = new TikTokConnector(TIKTOK_USERNAME, { enableExtendedGiftInfo: false });
+// ================== WEBSOCKET ==================
+const wss = new WebSocketServer({ port: WS_PORT, maxPayload: 100 * 1024 * 1024 });
+console.log(\`[WS] WebSocket đang lắng nghe tại ws://localhost:\${WS_PORT}\`);
 
 function broadcast(data, excludeWs = null) {
   const json = JSON.stringify(data);
@@ -1566,6 +1585,19 @@ function broadcast(data, excludeWs = null) {
   });
 }
 
+wss.on('connection', ws => {
+  console.log(\`[WS] Client kết nối. Tổng: \${wss.clients.size}\`);
+  ws.on('message', raw => {
+    try {
+      const msg = JSON.parse(raw);
+      if (msg.type === 'ADMIN_SYNC') broadcast(msg, ws);
+    } catch (e) {}
+  });
+  ws.on('close', () => console.log(\`[WS] Client ngắt kết nối. Còn lại: \${wss.clients.size}\`));
+  ws.on('error', err => console.error('[WS LỖI]', err?.message || err));
+});
+
+// ================== HÀM TIỆN ÍCH ==================
 function getUserName(data) {
   return (
     data?.user?.nickname ||
@@ -1598,27 +1630,44 @@ function getUserAvatar(data) {
   return null;
 }
 
-wss.on('connection', ws => {
-  ws.on('message', raw => {
-    try {
-      const msg = JSON.parse(raw);
-      if (msg.type === 'ADMIN_SYNC') broadcast(msg, ws);
-    } catch (e) {}
-  });
-});
+// ================== KẾT NỐI TIKTOK LIVE ==================
+const tiktok = new TikTokConnector(TIKTOK_USERNAME, { enableExtendedGiftInfo: false });
+
+let reconnecting = false;
+function scheduleReconnect(reason) {
+  if (reconnecting) return;
+  reconnecting = true;
+  console.log(\`[KẾT NỐI LẠI] Thử lại sau \${RECONNECT_DELAY_MS / 1000}s... (\${reason})\`);
+  setTimeout(() => {
+    reconnecting = false;
+    connectTikTok();
+  }, RECONNECT_DELAY_MS);
+}
 
 function connectTikTok() {
+  console.log(\`[ĐANG KẾT NỐI] Phòng live của @\${TIKTOK_USERNAME}...\`);
   tiktok.connect().then(state => {
-    console.log(\`[THÀNH CÔNG] Đã kết nối phòng Live: \${state.roomId || TIKTOK_USERNAME}\`);
-  }).catch(() => {
-    setTimeout(connectTikTok, 8000);
+    console.log(\`[THÀNH CÔNG] Đã kết nối phòng Live: \${state?.roomId || TIKTOK_USERNAME}\`);
+    console.log('[SẴN SÀNG] Đang chờ comment, quà, like, follow...');
+  }).catch(err => {
+    console.error('[LỖI KẾT NỐI]', err?.message || err);
+    scheduleReconnect('connect thất bại');
   });
 }
-connectTikTok();
 
+// ---- Trạng thái kết nối ----
+tiktok.on('disconnected', () => {
+  console.warn('[NGẮT KẾT NỐI] Phiên live bị ngắt');
+  scheduleReconnect('disconnected');
+});
+tiktok.on('streamEnd', () => console.warn('[KẾT THÚC] Live đã kết thúc'));
+tiktok.on('error', err => console.error('[LỖI TIKTOK]', err?.info || err?.message || err));
+
+// ---- Sự kiện tương tác (có log) ----
 tiktok.on('chat', data => {
   const username = getUserName(data);
   const comment = String(getCommentText(data) || '').trim();
+  console.log(\`[CHAT] \${username}: \${comment || '(rỗng)'}\`);
   if (!comment) return;
   broadcast({ type: 'chat', username, avatarUrl: getUserAvatar(data), comment });
 });
@@ -1630,16 +1679,22 @@ tiktok.on('gift', data => {
   if (data?.giftType === 1 && !data?.repeatEnd) return;
   const giftName = data?.giftDetails?.giftName || data?.giftName || 'Quà tặng';
   const coins = Math.max(1, diamondCount * repeatCount);
+  console.log(\`[QUÀ] \${username} tặng \${giftName} x\${repeatCount} (\${coins} xu)\`);
   broadcast({ type: 'gift', username, avatarUrl: getUserAvatar(data), giftName, coins });
 });
 
 tiktok.on('like', data => {
   const username = getUserName(data);
   const likeCount = Math.max(1, Number(data?.likeCount ?? data?.count ?? 1));
+  if (LOG_LIKES) console.log(\`[LIKE] \${username} +\${likeCount}\`);
   broadcast({ type: 'like', username, avatarUrl: getUserAvatar(data), likeCount });
 });
 
 tiktok.on('follow', data => {
   const username = getUserName(data);
+  console.log(\`[FOLLOW] \${username}\`);
   broadcast({ type: 'follow', username, avatarUrl: getUserAvatar(data) });
-});`;
+});
+
+// Đặt cuối cùng, sau khi mọi handler đã được đăng ký
+connectTikTok();`;
