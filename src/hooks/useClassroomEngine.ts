@@ -60,6 +60,7 @@ import {
   Point2D,
   QueuedPilgrimRequest,
   RectBounds,
+  RoamingCatAgent,
   RunningPigAgent,
   SafetyActionMode,
   SafetyCategory,
@@ -95,13 +96,79 @@ function getQuizRankPoints(rankOneBased: number): number {
   if (rankOneBased === 1) return 10;
   if (rankOneBased === 2) return 8;
   if (rankOneBased === 3) return 7;
+  if (rankOneBased === 4) return 6;
   return 5;
+}
+
+function pickRandomLessonPrepSpeech(cfg: GameConfig): string {
+  const list = Array.isArray(cfg.lessonPrepareTtsTexts)
+    ? cfg.lessonPrepareTtsTexts.map((s) => (s || '').trim()).filter(Boolean)
+    : [];
+  if (list.length > 0) {
+    return list[Math.floor(Math.random() * list.length)];
+  }
+  return (cfg.lessonPrepareTtsText || 'Chuẩn bị').trim() || 'Chuẩn bị';
+}
+
+function getTeacherSideGiftPos(
+  teacherX: number,
+  teacherY: number,
+  studentRefX: number
+): Point2D {
+  const sideGap = 42;
+  const preferLeft = studentRefX <= teacherX;
+  const leftCandidate = teacherX - sideGap;
+  const rightCandidate = teacherX + sideGap;
+  let finalX: number;
+  if (preferLeft) {
+    finalX = leftCandidate >= 38 ? leftCandidate : Math.min(502, rightCandidate);
+  } else {
+    finalX = rightCandidate <= 502 ? rightCandidate : Math.max(38, leftCandidate);
+  }
+  return {
+    x: Math.round(Math.max(38, Math.min(502, finalX))),
+    y: Math.round(teacherY + 2),
+  };
 }
 
 function formatShortQuizAnswer(word: string): string {
   const clean = (word || '').trim();
   if (!clean) return '';
   return clean.charAt(0).toUpperCase() + clean.slice(1).toLowerCase();
+}
+
+/**
+ * Tạo câu trả lời sai tự nhiên của NPC bằng cách hoán đổi ngẫu nhiên vị trí 2 chữ cái liền nhau khác nhau.
+ * Hệ thống chấm điểm sẽ tự động nhận diện đây là câu trả lời sai.
+ */
+function buildTypoQuizAnswer(word: string): string {
+  const clean = formatShortQuizAnswer(word);
+  if (clean.length < 2) {
+    return `${clean}a`;
+  }
+  const chars = clean.split('');
+  const validSwapPositions: number[] = [];
+  for (let i = 0; i < chars.length - 1; i++) {
+    if (
+      /[a-zA-Z]/.test(chars[i]) &&
+      /[a-zA-Z]/.test(chars[i + 1]) &&
+      chars[i].toLowerCase() !== chars[i + 1].toLowerCase()
+    ) {
+      validSwapPositions.push(i);
+    }
+  }
+
+  if (validSwapPositions.length > 0) {
+    const idx =
+      validSwapPositions[Math.floor(Math.random() * validSwapPositions.length)];
+    const temp = chars[idx];
+    chars[idx] = chars[idx + 1];
+    chars[idx + 1] = temp;
+    const swapped = chars.join('');
+    return swapped.charAt(0).toUpperCase() + swapped.slice(1).toLowerCase();
+  }
+
+  return `${clean}e`;
 }
 
 function isJoinClassCommand(text: string): boolean {
@@ -367,6 +434,7 @@ export function useClassroomEngine() {
   const [burnerLotusBursts, setBurnerLotusBursts] = useState<BurnerLotusBurstFX[]>([]);
   const [flyingLotuses, setFlyingLotuses] = useState<FlyingLotusFX[]>([]);
   const [runningPigs, setRunningPigs] = useState<RunningPigAgent[]>([]);
+  const [roamingCats, setRoamingCats] = useState<RoamingCatAgent[]>([]);
   const [specialFlowerRunners, setSpecialFlowerRunners] = useState<PilgrimData[]>([]);
   const [flyingFlowers, setFlyingFlowers] = useState<FlyingFlowerFX[]>([]);
   const [simpleExplosions, setSimpleExplosions] = useState<SimpleExplosionFX[]>([]);
@@ -469,6 +537,26 @@ export function useClassroomEngine() {
   const doorCrowdRef = useRef(doorCrowd);
   doorCrowdRef.current = doorCrowd;
   const doorCrowdCursorRef = useRef(0);
+  // Giới hạn hiển thị chatbox của học sinh hàng chờ (doorCrowd): mỗi 3s show tối đa 10 chat mới nhất
+  const doorCrowdChatWindowRef = useRef<{
+    windowStart: number;
+    shownCount: number;
+    pendingQueue: Array<{
+      username: string;
+      lowerUser: string;
+      comment: string;
+      gender: 'female' | 'male';
+      avatarUrl?: string | null;
+      isBot: boolean;
+      allowTTS: boolean;
+    }>;
+    flushTimer: ReturnType<typeof setTimeout> | null;
+  }>({
+    windowStart: 0,
+    shownCount: 0,
+    pendingQueue: [],
+    flushTimer: null,
+  });
   const controlledNpcRoleRef = useRef(controlledNpcRole);
   controlledNpcRoleRef.current = controlledNpcRole;
   const wasdKeysRef = useRef<{ w: boolean; a: boolean; s: boolean; d: boolean }>({
@@ -546,6 +634,232 @@ export function useClassroomEngine() {
       return detected;
     },
     []
+  );
+
+  const topStreakTrackerRef = useRef<{
+    flow5LastFastestUser: string;
+    flow5LastFastestDisplay: string;
+    flow5Streak: number;
+    flow6LastTop1User: string;
+    flow6Streak: number;
+  }>({
+    flow5LastFastestUser: '',
+    flow5LastFastestDisplay: '',
+    flow5Streak: 0,
+    flow6LastTop1User: '',
+    flow6Streak: 0,
+  });
+
+  // Bộ lọc đảm bảo tỉ lệ Nam - Nữ gần 50-50 khi NPC vào lớp hoặc vào hàng chờ
+  const resolveBalancedNpcGender = useCallback(
+    (
+      username: string,
+      targetGroup: 'class' | 'queue' = 'class',
+      explicitGender?: 'female' | 'male'
+    ): 'female' | 'male' => {
+      const lower = (username || '').trim().toLowerCase();
+      if (explicitGender) {
+        if (lower) userGenderOverridesRef.current.set(lower, explicitGender);
+        return explicitGender;
+      }
+
+      let maleCount = 0;
+      let femaleCount = 0;
+      if (targetGroup === 'class') {
+        for (const p of pilgrimsRef.current) {
+          if (
+            p.slotId !== null &&
+            p.state !== 'leave_side_to_aisle' &&
+            p.state !== 'leave_down_exit'
+          ) {
+            if (p.gender === 'female') femaleCount++;
+            else maleCount++;
+          }
+        }
+      } else {
+        for (const q of waitingPoolRef.current.values()) {
+          if (q.gender === 'female') femaleCount++;
+          else maleCount++;
+        }
+      }
+
+      let chosen: 'female' | 'male';
+      if (maleCount > femaleCount) {
+        chosen = 'female';
+      } else if (femaleCount > maleCount) {
+        chosen = 'male';
+      } else {
+        chosen = detectVietnameseGender(username);
+      }
+
+      if (lower) userGenderOverridesRef.current.set(lower, chosen);
+      return chosen;
+    },
+    []
+  );
+
+  // Áp dụng hiển thị tối đa 10 chat mới nhất mỗi 3 giây cho nhóm học sinh hàng chờ (doorCrowd)
+  const applyDoorCrowdChatItems = useCallback(
+    (
+      items: Array<{
+        username: string;
+        lowerUser: string;
+        comment: string;
+        gender: 'female' | 'male';
+        avatarUrl?: string | null;
+        isBot: boolean;
+        allowTTS: boolean;
+      }>
+    ) => {
+      if (items.length === 0 || doorCrowdRef.current.length === 0) return;
+      const now = Date.now();
+      const cfg = configRef.current;
+      const bubbleUntil = now + (cfg.chatBubbleDurationSec || 12) * 1000;
+      let pool = [...doorCrowdRef.current];
+      const poolLen = pool.length;
+
+      items.forEach((item) => {
+        // Ưu tiên 1: Học sinh trong nhóm cửa lớp đã mang tên người này
+        let targetIdx = pool.findIndex(
+          (s) => s.username.trim().toLowerCase() === item.lowerUser
+        );
+
+        // Ưu tiên 2: Chọn ngẫu nhiên 1 học sinh trong nhóm cửa lớp đang rảnh (đã tắt bong bóng chat)
+        if (targetIdx < 0) {
+          const freeIndices: number[] = [];
+          for (let i = 0; i < poolLen; i++) {
+            if (!pool[i].chatBubbleUntil || pool[i].chatBubbleUntil! <= now) {
+              freeIndices.push(i);
+            }
+          }
+          if (freeIndices.length > 0) {
+            targetIdx =
+              freeIndices[Math.floor(Math.random() * freeIndices.length)];
+          }
+        }
+
+        // Ưu tiên 3: Nếu tất cả đều đang hiện bong bóng, chọn người có bong bóng sắp tắt nhất (cũ nhất)
+        if (targetIdx < 0) {
+          let oldestIdx = 0;
+          let oldestUntil = Infinity;
+          for (let i = 0; i < poolLen; i++) {
+            const until = pool[i].chatBubbleUntil || 0;
+            if (until < oldestUntil) {
+              oldestUntil = until;
+              oldestIdx = i;
+            }
+          }
+          targetIdx = oldestIdx;
+        }
+
+        doorCrowdCursorRef.current = (targetIdx + 1) % poolLen;
+        const chosenDoorStudent = pool[targetIdx];
+
+        pool[targetIdx] = {
+          ...chosenDoorStudent,
+          username: item.username,
+          prayer: item.comment,
+          gender: item.gender,
+          avatarUrl: item.avatarUrl || chosenDoorStudent.avatarUrl,
+          hasComment: true,
+          stateTimer: 0,
+          chatBubbleUntil: bubbleUntil,
+        };
+
+        const cleanSpeechComment = sanitizeAndLimitSpeechText(
+          item.comment,
+          cfg.maxTtsWords || 25
+        );
+        const shouldSpeakOutsideComment =
+          cfg.ttsEnabled &&
+          item.allowTTS &&
+          !cfg.ttsVipOnly &&
+          ((!item.isBot && cfg.realPrayerTtsEnabled) ||
+            (item.isBot && cfg.npcPrayerTtsEnabled)) &&
+          Boolean(cleanSpeechComment);
+
+        if (shouldSpeakOutsideComment) {
+          const tpl = pickRandomTemplate(
+            cfg.prayerTtsTemplates,
+            cfg.realPrayerTtsTemplate ||
+              'Bạn [Tên] giơ tay phát biểu: [Comment]'
+          );
+          const speech = soundEngine.formatEventTemplate(
+            tpl,
+            item.username,
+            cleanSpeechComment,
+            cfg.maxTtsWords
+          );
+          soundEngine.enqueueTTS(speech, !item.isBot, cfg, {
+            pilgrimId: chosenDoorStudent.id,
+            username: item.username,
+            reason: 'comment',
+            isBot: item.isBot,
+          });
+        }
+      });
+
+      doorCrowdRef.current = pool;
+      setDoorCrowd(pool);
+    },
+    []
+  );
+
+  const enqueueDoorCrowdChat = useCallback(
+    (item: {
+      username: string;
+      lowerUser: string;
+      comment: string;
+      gender: 'female' | 'male';
+      avatarUrl?: string | null;
+      isBot: boolean;
+      allowTTS: boolean;
+    }) => {
+      if (doorCrowdRef.current.length === 0) return;
+      const now = Date.now();
+      const win = doorCrowdChatWindowRef.current;
+
+      // Nếu đã qua chu kỳ 3 giây mới -> reset bộ đếm cửa sổ 3s
+      if (now - win.windowStart >= 3000) {
+        win.windowStart = now;
+        win.shownCount = 0;
+      }
+
+      // Nếu trong 3s hiện tại chưa đủ 10 chat và không có hàng đợi -> hiển thị ngay lập tức
+      if (win.shownCount < 10 && win.pendingQueue.length === 0) {
+        win.shownCount += 1;
+        applyDoorCrowdChatItems([item]);
+        return;
+      }
+
+      // Nếu vượt quá 10 chat trong vòng 3s -> chỉ giữ lại tối đa 10 chat mới nhất trong hàng đợi chờ qua 3s kế tiếp
+      const existingIdx = win.pendingQueue.findIndex(
+        (q) => q.lowerUser === item.lowerUser
+      );
+      if (existingIdx >= 0) {
+        win.pendingQueue.splice(existingIdx, 1);
+      }
+      win.pendingQueue.push(item);
+      if (win.pendingQueue.length > 10) {
+        win.pendingQueue = win.pendingQueue.slice(-10);
+      }
+
+      if (!win.flushTimer) {
+        const waitMs = Math.max(80, 3000 - (now - win.windowStart));
+        win.flushTimer = setTimeout(() => {
+          const w = doorCrowdChatWindowRef.current;
+          w.flushTimer = null;
+          w.windowStart = Date.now();
+          const batch = w.pendingQueue.slice(-10);
+          w.pendingQueue = [];
+          w.shownCount = batch.length;
+          if (batch.length > 0) {
+            applyDoorCrowdChatItems(batch);
+          }
+        }, waitMs);
+      }
+    },
+    [applyDoorCrowdChatItems]
   );
 
   // Đồng bộ nhóm học sinh đứng chùm ở cửa lớp khi chỉnh vị trí, số lượng hoặc độ giãn cách trong Dev Map
@@ -957,47 +1271,124 @@ export function useClassroomEngine() {
     []
   );
 
-  const addLotusPointsToDonor = useCallback((username: string, points: number) => {
-    if (!username || points <= 0) return;
-    const cleanName = username.trim();
-    setLotusDonors((prev) => {
-      const idx = prev.findIndex(
-        (d) => d.username.toLowerCase() === cleanName.toLowerCase()
-      );
-      if (idx >= 0) {
-        const updated = [...prev];
-        updated[idx] = {
-          ...updated[idx],
-          coins: updated[idx].coins + points,
-        };
-        return updated.sort((a, b) => b.coins - a.coins);
+  const triggerStudentScoreCardPopup = useCallback(
+    (lowerName: string, newTotalScore: number, delta: number) => {
+      if (!lowerName || delta === 0) return;
+      const now = Date.now();
+      const durationMs =
+        Math.max(0.5, configRef.current.scoreTagDurationSec ?? 4) * 1000;
+      const cardUntil = now + durationMs;
+      const cardKey = now + Math.random();
+
+      let changedPilgrim = false;
+      const nextPilgrims = pilgrimsRef.current.map((p) => {
+        if (
+          p.username.trim().toLowerCase() === lowerName &&
+          p.state !== 'leave_side_to_aisle' &&
+          p.state !== 'leave_down_exit'
+        ) {
+          changedPilgrim = true;
+          return {
+            ...p,
+            currentScoreDisplay: newTotalScore,
+            scoreChangeDelta: delta,
+            scoreCardUntil: cardUntil,
+            scoreCardKey: cardKey,
+          };
+        }
+        return p;
+      });
+      if (changedPilgrim) {
+        pilgrimsRef.current = nextPilgrims;
+        setPilgrims(nextPilgrims);
       }
-      return [...prev, { username: cleanName, coins: points }].sort(
-        (a, b) => b.coins - a.coins
+
+      if (specialFlowerRunnersRef.current.length > 0) {
+        let changedRunner = false;
+        const nextRunners = specialFlowerRunnersRef.current.map((r) => {
+          if (r.username.trim().toLowerCase() === lowerName) {
+            changedRunner = true;
+            return {
+              ...r,
+              currentScoreDisplay: newTotalScore,
+              scoreChangeDelta: delta,
+              scoreCardUntil: cardUntil,
+              scoreCardKey: cardKey,
+            };
+          }
+          return r;
+        });
+        if (changedRunner) {
+          specialFlowerRunnersRef.current = nextRunners;
+          setSpecialFlowerRunners(nextRunners);
+        }
+      }
+    },
+    []
+  );
+
+  const addLotusPointsToDonor = useCallback(
+    (username: string, points: number, suppressPopup = false) => {
+      if (!username || points <= 0) return;
+      const cleanName = username.trim();
+      const lower = cleanName.toLowerCase();
+      const prevList = lotusDonorsRef.current;
+      const idx = prevList.findIndex(
+        (d) => d.username.trim().toLowerCase() === lower
       );
-    });
-  }, []);
+      const newTotal = idx >= 0 ? prevList[idx].coins + points : points;
+      const nextList =
+        idx >= 0
+          ? prevList
+              .map((d, i) => (i === idx ? { ...d, coins: newTotal } : d))
+              .sort((a, b) => b.coins - a.coins)
+          : [...prevList, { username: cleanName, coins: newTotal }].sort(
+              (a, b) => b.coins - a.coins
+            );
+      lotusDonorsRef.current = nextList;
+      setLotusDonors(nextList);
+      if (!suppressPopup) {
+        triggerStudentScoreCardPopup(lower, newTotal, points);
+      } else {
+        // Khi trả lời đúng câu hỏi trong lớp: chỉ cập nhật điểm tổng ẩn, đợi sang Luồng 5 mới hiện đồng loạt thẻ điểm + text cộng điểm
+        let changed = false;
+        const nextPilgrims = pilgrimsRef.current.map((p) => {
+          if (p.username.trim().toLowerCase() === lower) {
+            changed = true;
+            return { ...p, currentScoreDisplay: newTotal };
+          }
+          return p;
+        });
+        if (changed) {
+          pilgrimsRef.current = nextPilgrims;
+          setPilgrims(nextPilgrims);
+        }
+      }
+    },
+    [triggerStudentScoreCardPopup]
+  );
 
   const deductLotusPointsFromDonor = useCallback(
     (username: string, penaltyPoints: number) => {
       if (!username || penaltyPoints <= 0) return;
       const cleanName = username.trim();
-      setLotusDonors((prev) => {
-        const idx = prev.findIndex(
-          (d) => d.username.toLowerCase() === cleanName.toLowerCase()
-        );
-        if (idx >= 0) {
-          const updated = [...prev];
-          updated[idx] = {
-            ...updated[idx],
-            coins: Math.max(0, updated[idx].coins - penaltyPoints),
-          };
-          return updated.sort((a, b) => b.coins - a.coins);
-        }
-        return prev;
-      });
+      const lower = cleanName.toLowerCase();
+      const prevList = lotusDonorsRef.current;
+      const idx = prevList.findIndex(
+        (d) => d.username.trim().toLowerCase() === lower
+      );
+      const prevCoins = idx >= 0 ? prevList[idx].coins : 0;
+      const newTotal = Math.max(0, prevCoins - penaltyPoints);
+      if (idx >= 0) {
+        const nextList = prevList
+          .map((d, i) => (i === idx ? { ...d, coins: newTotal } : d))
+          .sort((a, b) => b.coins - a.coins);
+        lotusDonorsRef.current = nextList;
+        setLotusDonors(nextList);
+      }
+      triggerStudentScoreCardPopup(lower, newTotal, -penaltyPoints);
     },
-    []
+    [triggerStudentScoreCardPopup]
   );
 
   const triggerRandomClassroomEventRef = useRef<() => void>(() => {});
@@ -1367,24 +1758,16 @@ export function useClassroomEngine() {
 
       const groupRank = isSeated ? prevClassCount + 1 : prevOutsideCount + 1;
       const baseRewardPoints = getQuizRankPoints(groupRank);
-      const luckyMult = bState.currentQuestion?.luckyStars || 1;
+      const rawLuckyStars = bState.currentQuestion?.luckyStars || 0;
+      const luckyMult = rawLuckyStars > 0 ? rawLuckyStars + 1 : 1;
       const rewardPoints = baseRewardPoints * punishmentMult * luckyMult;
 
       if (existingInClass) {
-        const nowScore = Date.now();
         const nextPilgrims = pilgrimsRef.current.map((p) =>
           p.id === existingInClass.id
             ? {
                 ...p,
                 answeredCurrentQuestion: true,
-                ...(punishmentMult > 1
-                  ? {
-                      floatingScoreText: `+${rewardPoints}đ (x${punishmentMult})`,
-                      floatingScoreColor: 'gold' as const,
-                      floatingScoreUntil: nowScore + 3600,
-                      floatingScoreKey: nowScore,
-                    }
-                  : {}),
               }
             : p
         );
@@ -1401,7 +1784,8 @@ export function useClassroomEngine() {
         existingInWaitingQueue.idleRounds = 0;
       }
 
-      addLotusPointsToDonor(username, rewardPoints);
+      // Học sinh trong lớp trả lời đúng: không hiện bảng điểm và text cộng điểm ngay, đợi vào Luồng 5 (Bảng kết quả) mới hiển thị đồng loạt
+      addLotusPointsToDonor(username, rewardPoints, Boolean(existingInClass));
       // +1 điểm vào bảng "Kích hoạt sự kiện" tương ứng mỗi câu trả lời đúng từ học sinh trong lớp học và học sinh học ké + hoa bay tượng trưng
       const flowerOrigin: Point2D = existingInClass
         ? { x: existingInClass.x, y: existingInClass.y - 16 }
@@ -1457,17 +1841,20 @@ export function useClassroomEngine() {
                 p.punishmentMultiplier
             );
             const mult = punishedMatch?.punishmentMultiplier || 1;
-            const luckyMult = prev.currentQuestion?.luckyStars || 1;
+            const rawStars = prev.currentQuestion?.luckyStars || 0;
+            const luckyMult = rawStars > 0 ? rawStars + 1 : 1;
             return { ...w, points: getQuizRankPoints(idx + 1) * mult * luckyMult };
           });
         const nextOutsideWinners = nextWinners
           .filter((w) => w.isSeated === false)
-          .map((w, idx) => ({
-            ...w,
-            points:
-              getQuizRankPoints(idx + 1) *
-              (prev.currentQuestion?.luckyStars || 1),
-          }));
+          .map((w, idx) => {
+            const rawStars = prev.currentQuestion?.luckyStars || 0;
+            const luckyMult = rawStars > 0 ? rawStars + 1 : 1;
+            return {
+              ...w,
+              points: getQuizRankPoints(idx + 1) * luckyMult,
+            };
+          });
 
         const nextState: ClassBoardRuntimeState = {
           ...prev,
@@ -1573,12 +1960,16 @@ export function useClassroomEngine() {
           ? 'abbot'
           : 'senior_novice';
         const targetNpc = monksRef.current.find((m) => m.role === targetRole);
-        const targetX = isForTeacher
-          ? Math.max(84, Math.min(456, (targetNpc?.x ?? 270) - 26))
-          : Math.max(40, Math.min(480, (targetNpc?.x ?? 46) + 26));
-        const targetY = isForTeacher
-          ? (targetNpc?.y ?? 438) + 8
-          : (targetNpc?.y ?? 502) + 4;
+        const studentObj = pilgrimsRef.current.find(
+          (p) => p.id === targetPilgrimId
+        );
+        const sideGiftPos = getTeacherSideGiftPos(
+          targetNpc?.x ?? (isForTeacher ? 360 : 130),
+          targetNpc?.y ?? (isForTeacher ? 444 : 498),
+          studentObj?.x ?? 270
+        );
+        const targetX = sideGiftPos.x;
+        const targetY = sideGiftPos.y;
 
         const nextPilgrims = pilgrimsRef.current.map((p) =>
           p.id === targetPilgrimId
@@ -1603,13 +1994,10 @@ export function useClassroomEngine() {
                 floatingScoreColor: 'gold' as const,
                 floatingScoreUntil: now + 3400,
                 floatingScoreKey: now,
-                prayer:
-                  safeComment ||
-                  (isForTeacher
-                    ? 'Em tặng hoa cho Cô Thảo ạ! 🌹'
-                    : 'Em tặng hoa cho Thầy Tùng ạ! 🍦🌹'),
-                hasComment: true,
-                chatBubbleUntil: now + 6500,
+                prayer: '',
+                hasComment: false,
+                chatBubbleUntil: 0,
+                giftActionHighlightUntil: now + 6500,
               }
             : p
         );
@@ -1637,13 +2025,51 @@ export function useClassroomEngine() {
       }
 
       if (giftId === 'cat') {
+        const maxCats = Math.max(
+          1,
+          Math.min(5, cfg.giftModelScales?.maxDeskCats ?? 5)
+        );
+        const targetStudent = pilgrimsRef.current.find(
+          (p) => p.id === targetPilgrimId
+        );
+        const allDesks = [
+          ...groupSlotsIntoDoubleDesks(vipSlotsRef.current, 'vip'),
+          ...groupSlotsIntoDoubleDesks(normalSlotsRef.current, 'norm'),
+        ];
+        const studentDesk = targetStudent?.slotId
+          ? allDesks.find(
+              (d) =>
+                d.leftSlot.id === targetStudent.slotId ||
+                d.rightSlot?.id === targetStudent.slotId
+            )
+          : undefined;
+        const deskSlotIds = new Set<string>(
+          studentDesk
+            ? [
+                studentDesk.leftSlot.id,
+                ...(studentDesk.rightSlot ? [studentDesk.rightSlot.id] : []),
+              ]
+            : targetStudent?.slotId
+            ? [targetStudent.slotId]
+            : []
+        );
+        const currentCatsOnDesk = pilgrimsRef.current
+          .filter((p) => p.slotId && deskSlotIds.has(p.slotId) && p.hasDeskCat)
+          .reduce((sum, p) => sum + Math.max(1, p.deskCatCount || 1), 0);
+
+        const isOverflowCat = currentCatsOnDesk >= maxCats;
+
         const nextPilgrims = pilgrimsRef.current.map((p) =>
           p.id === targetPilgrimId
             ? {
                 ...p,
                 hasDeskCat: true,
+                deskCatCount: isOverflowCat
+                  ? Math.max(1, p.deskCatCount || 1)
+                  : (p.hasDeskCat ? Math.max(1, p.deskCatCount || 1) : 0) + 1,
                 deskCatDropAt: now,
                 giftActionBusyUntil: now + actionBusyMs,
+                giftActionHighlightUntil: now + 5500,
                 comboCount: hasCombo ? comboCount : p.comboCount,
                 comboUntil: hasCombo ? now + 8000 : p.comboUntil,
                 comboPopKey: hasCombo ? now : p.comboPopKey,
@@ -1651,7 +2077,7 @@ export function useClassroomEngine() {
                 floatingScoreColor: 'gold' as const,
                 floatingScoreUntil: now + 3400,
                 floatingScoreKey: now,
-                prayer: safeComment || 'Meow~ Em nuôi mèo trên bàn học ạ! 🐱',
+                prayer: 'Em nuôi mèo nè cô',
                 hasComment: true,
                 chatBubbleUntil: now + 5500,
               }
@@ -1659,10 +2085,62 @@ export function useClassroomEngine() {
         );
         pilgrimsRef.current = nextPilgrims;
         setPilgrims(nextPilgrims);
+
+        if (isOverflowCat && targetStudent) {
+          const jumpFromX = targetStudent.slotX || targetStudent.x;
+          const jumpFromY = (targetStudent.slotY || targetStudent.y) - 8;
+          const jumpToX =
+            targetStudent.laneX ||
+            Math.max(
+              70,
+              Math.min(470, jumpFromX + (jumpFromX < 270 ? -36 : 36))
+            );
+          const jumpToY = Math.min(
+            820,
+            (targetStudent.slotY || targetStudent.y) + 18
+          );
+          const roamWps: Point2D[] = [
+            {
+              x: 130 + Math.round(Math.random() * 280),
+              y: 505 + Math.round(Math.random() * 95),
+            },
+            {
+              x: 390 - Math.round(Math.random() * 250),
+              y: 635 + Math.round(Math.random() * 115),
+            },
+            {
+              x: 155 + Math.round(Math.random() * 230),
+              y: 485 + Math.round(Math.random() * 85),
+            },
+            { x: LEFT_DOOR_POS.x + 12, y: LEFT_DOOR_POS.y },
+            { x: LEFT_DOOR_POS.x - 26, y: LEFT_DOOR_POS.y + 8 },
+          ];
+          const newRoamingCat: RoamingCatAgent = {
+            id: `roam_cat_${now}_${Math.random().toString(36).slice(2, 6)}`,
+            x: jumpFromX,
+            y: jumpFromY,
+            jumpFromX,
+            jumpFromY,
+            jumpToX,
+            jumpToY,
+            jumpProgress: 0,
+            waypoints: roamWps,
+            waypointIndex: 0,
+            speed: 135 + Math.round(Math.random() * 25),
+            facingLeft: jumpToX < jumpFromX,
+            animTime: Math.random() * 2,
+          };
+          setRoamingCats((prev) => [...prev, newRoamingCat]);
+        }
+
         pushToast(
           `🐱 ${safeName} (${giftMeta.actionTitle}): ${
             isDeferredFromQueue ? 'Thực hiện lượt quà -> ' : `+${bonusPts}đ • `
-          }Mèo rơi xuống bàn học!`,
+          }${
+            isOverflowCat
+              ? `Bàn đã đủ ${maxCats} mèo -> Mèo nhảy xuống đất đi dạo quanh lớp!`
+              : 'Mèo rơi xuống bàn học!'
+          }`,
           true
         );
         return;
@@ -1676,6 +2154,7 @@ export function useClassroomEngine() {
                 hasDeskSnack: true,
                 deskSnackDropAt: now,
                 giftActionBusyUntil: now + actionBusyMs,
+                giftActionHighlightUntil: now + 5500,
                 comboCount: hasCombo ? comboCount : p.comboCount,
                 comboUntil: hasCombo ? now + 8000 : p.comboUntil,
                 comboPopKey: hasCombo ? now : p.comboPopKey,
@@ -1683,7 +2162,7 @@ export function useClassroomEngine() {
                 floatingScoreColor: 'gold' as const,
                 floatingScoreUntil: now + 3400,
                 floatingScoreKey: now,
-                prayer: safeComment || 'Măm măm ăn vụn bịch snack! 🍟',
+                prayer: 'Nhăm nhăm.',
                 hasComment: true,
                 chatBubbleUntil: now + 5500,
               }
@@ -1705,9 +2184,11 @@ export function useClassroomEngine() {
           p.id === targetPilgrimId
             ? {
                 ...p,
+                hasShield: true,
                 hasPcGamingDesk: true,
                 pcGamingDeskAt: now,
                 giftActionBusyUntil: now + actionBusyMs,
+                giftActionHighlightUntil: now + 6000,
                 comboCount: hasCombo ? comboCount : p.comboCount,
                 comboUntil: hasCombo ? now + 8000 : p.comboUntil,
                 comboPopKey: hasCombo ? now : p.comboPopKey,
@@ -1715,8 +2196,7 @@ export function useClassroomEngine() {
                 floatingScoreColor: 'gold' as const,
                 floatingScoreUntil: now + 3400,
                 floatingScoreKey: now,
-                prayer:
-                  safeComment || 'Reng reng! Đổi skin bàn PC Gaming RGB! 🖥️',
+                prayer: 'Ring! Ring!',
                 hasComment: true,
                 chatBubbleUntil: now + 6000,
               }
@@ -1727,32 +2207,64 @@ export function useClassroomEngine() {
         pushToast(
           `💖 ${safeName} (${giftMeta.actionTitle}): ${
             isDeferredFromQueue ? 'Thực hiện lượt quà -> ' : `+${bonusPts}đ • `
-          }Đổi skin bàn PC Gaming!`,
+          }Đổi skin bàn PC Gaming + Nhận Khiên Bảo Vệ 🛡️!`,
           true
         );
         return;
       }
 
       if (giftId === 'pig') {
-        const nextPilgrims = pilgrimsRef.current.map((p) =>
-          p.id === targetPilgrimId
-            ? {
-                ...p,
-                giftActionBusyUntil: now + actionBusyMs,
-                comboCount: hasCombo ? comboCount : p.comboCount,
-                comboUntil: hasCombo ? now + 8000 : p.comboUntil,
-                comboPopKey: hasCombo ? now : p.comboPopKey,
-                floatingScoreText: `+${bonusPts}đ`,
-                floatingScoreColor: 'gold' as const,
-                floatingScoreUntil: now + 3600,
-                floatingScoreKey: now,
-                prayer:
-                  safeComment || 'Thả 5 chú heo hù dọa Top 5 trong lớp! 🐷💥',
-                hasComment: true,
-                chatBubbleUntil: now + 6500,
-              }
-            : p
+        const gifterNow = pilgrimsRef.current.find(
+          (p) => p.id === targetPilgrimId
         );
+        const allSeatSlots = [
+          ...vipSlotsRef.current,
+          ...normalSlotsRef.current,
+        ];
+        const gifterSlot = gifterNow?.slotId
+          ? allSeatSlots.find((s) => s.id === gifterNow.slotId)
+          : undefined;
+        const gifterDeskId = gifterSlot?.deskId;
+        const sameDeskSlotIds = new Set(
+          gifterDeskId
+            ? allSeatSlots
+                .filter((s) => s.deskId === gifterDeskId)
+                .map((s) => s.id)
+            : gifterNow?.slotId
+            ? [gifterNow.slotId]
+            : []
+        );
+
+        const nextPilgrims = pilgrimsRef.current.map((p) => {
+          if (p.id === targetPilgrimId) {
+            return {
+              ...p,
+              hasShield: true,
+              hasDeskPig: true,
+              deskPigDropAt: now,
+              giftActionBusyUntil: now + actionBusyMs,
+              giftActionHighlightUntil: now + 6500,
+              comboCount: hasCombo ? comboCount : p.comboCount,
+              comboUntil: hasCombo ? now + 8000 : p.comboUntil,
+              comboPopKey: hasCombo ? now : p.comboPopKey,
+              floatingScoreText: `+${bonusPts}đ`,
+              floatingScoreColor: 'gold' as const,
+              floatingScoreUntil: now + 3600,
+              floatingScoreKey: now,
+              prayer: 'ột ột 😈😈😈',
+              hasComment: true,
+              chatBubbleUntil: now + 6500,
+            };
+          }
+          // Đảm bảo max: 1 con heo trên bàn (nếu bạn cùng bàn đang có heo trên bàn thì nhường chỗ cho con heo mới)
+          if (p.slotId && sameDeskSlotIds.has(p.slotId) && p.hasDeskPig) {
+            return {
+              ...p,
+              hasDeskPig: false,
+            };
+          }
+          return p;
+        });
         pilgrimsRef.current = nextPilgrims;
         setPilgrims(nextPilgrims);
 
@@ -1779,17 +2291,17 @@ export function useClassroomEngine() {
 
         const targetPool =
           candidates.length > 0
-            ? candidates.slice(0, 5)
+            ? candidates.slice(0, 8)
             : targetSelf
             ? [targetSelf]
             : [];
         if (targetPool.length > 0) {
           const spawnedPigs: RunningPigAgent[] = Array.from(
-            { length: 5 },
+            { length: 8 },
             (_, idx) => {
               const targetStudent = targetPool[idx % targetPool.length];
               const startX = LEFT_DOOR_POS.x + (idx % 2) * 8;
-              const startY = LEFT_DOOR_POS.y + (idx - 2) * 7;
+              const startY = LEFT_DOOR_POS.y + (idx - 3.5) * 6;
               return {
                 id: `pig_${now}_${idx}_${Math.random().toString(36).slice(2, 6)}`,
                 x: startX,
@@ -1802,9 +2314,9 @@ export function useClassroomEngine() {
                 waypointIndex: 0,
                 targetPilgrimId: targetStudent.id,
                 targetUsername: targetStudent.username,
-                speed: 220 + idx * 12,
+                speed: 220 + idx * 10,
                 facingLeft: false,
-                animTime: idx * 0.35,
+                animTime: idx * 0.3,
               };
             }
           );
@@ -1813,7 +2325,7 @@ export function useClassroomEngine() {
         pushToast(
           `🐷 ${safeName} (${giftMeta.actionTitle}): ${
             isDeferredFromQueue ? 'Thực hiện lượt quà -> ' : `+${bonusPts}đ • `
-          }Thả 5 heo đụng Top 5 (-20đ)!`,
+          }Thêm 1 heo lên bàn (max 1) & Thả 8 heo tấn công (-20đ)!`,
           true
         );
         return;
@@ -1834,9 +2346,11 @@ export function useClassroomEngine() {
           return {
             ...p,
             isVip: true,
+            hasShield: true,
             hasGoldenAura: true,
             richKidDanceUntil: now + 5000,
             giftActionBusyUntil: now + actionBusyMs,
+            giftActionHighlightUntil: now + 6800,
             comboCount: hasCombo ? comboCount : p.comboCount,
             comboUntil: hasCombo ? now + 8500 : p.comboUntil,
             comboPopKey: hasCombo ? now : p.comboPopKey,
@@ -1844,11 +2358,9 @@ export function useClassroomEngine() {
             floatingScoreColor: 'gold' as const,
             floatingScoreUntil: now + 4200,
             floatingScoreKey: now,
-            prayer:
-              safeComment ||
-              '💸 Tôi là Rich Kid! Tặng toàn bộ lớp +30đ nè! 🕺✨',
-            hasComment: true,
-            chatBubbleUntil: now + 6800,
+            prayer: '',
+            hasComment: false,
+            chatBubbleUntil: 0,
           };
         }
 
@@ -2333,10 +2845,22 @@ export function useClassroomEngine() {
           p.state !== 'leave_down_exit'
       );
 
+      const rawGiftCoins = Math.max(1, Number(opts.coins ?? giftMeta.coins));
+      const grantsShield = rawGiftCoins >= 5 || giftMeta.coins >= 5;
+
       // TRƯỜNG HỢP 1: Người chơi ĐANG CÓ TRONG LỚP -> Xếp vào hàng chờ hành động tuần tự (nếu đang rảnh thì chạy ngay, nếu đang bận quà trước thì chờ xong mới chạy quà tiếp theo)
       if (existingInClass) {
         const bonusPts = giftMeta.bonusPoints;
         addLotusPointsToDonor(safeName, bonusPts);
+
+        // Nếu tặng quà từ 5 coin trở lên -> Nhận ngay Khiên bảo vệ (không cộng dồn)
+        if (grantsShield && !existingInClass.hasShield) {
+          const withShield = pilgrimsRef.current.map((p) =>
+            p.id === existingInClass.id ? { ...p, hasShield: true } : p
+          );
+          pilgrimsRef.current = withShield;
+          setPilgrims(withShield);
+        }
 
         // Nếu thuộc nhóm quà phạt đặc biệt (5 / 10 / 10+) -> ghi nhận ngay vào danh sách phạt cuối vòng câu hỏi
         if (
@@ -2393,6 +2917,7 @@ export function useClassroomEngine() {
           p.id === existingInClass.id
             ? {
                 ...p,
+                hasShield: grantsShield ? true : p.hasShield,
                 comboCount: comboForQueued,
                 comboUntil: now + 9000,
                 comboPopKey: now,
@@ -2451,6 +2976,9 @@ export function useClassroomEngine() {
         existingInQueue.points = (existingInQueue.points || 0) + bonusPts;
         existingInQueue.coins = (existingInQueue.coins || 0) + giftMeta.coins;
         existingInQueue.avatarUrl = resolvedAvatar;
+        if (grantsShield) {
+          existingInQueue.hasShield = true;
+        }
         recomputeWaitingQueueLazy();
       } else {
         pool.set(lowerUser, {
@@ -2470,6 +2998,7 @@ export function useClassroomEngine() {
           idleRounds: 0,
           isGoldenPriority: true,
           goldenPriorityAt: now,
+          hasShield: grantsShield,
         });
         recomputeWaitingQueueLazy();
       }
@@ -2510,24 +3039,21 @@ export function useClassroomEngine() {
           ? 'abbot'
           : 'senior_novice';
         const targetNpc = monksRef.current.find((m) => m.role === targetRole);
-        const targetX = isForTeacher
-          ? Math.max(84, Math.min(456, (targetNpc?.x ?? 270) - 26))
-          : Math.max(40, Math.min(480, (targetNpc?.x ?? 46) + 26));
-        const targetY = isForTeacher
-          ? (targetNpc?.y ?? 438) + 8
-          : (targetNpc?.y ?? 502) + 4;
         const crowdPos = cfg.doorCrowdPos || LEFT_DOOR_POS;
+        const sideGiftPos = getTeacherSideGiftPos(
+          targetNpc?.x ?? (isForTeacher ? 360 : 130),
+          targetNpc?.y ?? (isForTeacher ? 444 : 498),
+          crowdPos.x
+        );
+        const targetX = sideGiftPos.x;
+        const targetY = sideGiftPos.y;
         const runnerId = nextIdRef.current++;
         const hasCombo = effectiveCombo > 1;
 
         const detachedRunner: PilgrimData = {
           id: runnerId,
           username: safeName,
-          prayer:
-            safeComment ||
-            (isForTeacher
-              ? 'Em tặng hoa cho Cô Thảo ạ! 🌹'
-              : 'Em tặng hoa cho Thầy Tùng ạ! 🍦🌹'),
+          prayer: '',
           gender: resolvedGender,
           isVip: true,
           isBot: Boolean(opts.isBot),
@@ -2550,8 +3076,9 @@ export function useClassroomEngine() {
           avatarUrl: resolvedAvatar,
           hairSeed: runnerId,
           isCarryingGift: true,
-          hasComment: true,
-          chatBubbleUntil: now + 6000,
+          hasComment: false,
+          chatBubbleUntil: 0,
+          giftActionHighlightUntil: now + 6000,
           isGoldenPriority: true,
           giftActionKind: giftMeta.id,
           giftTargetRole: targetRole,
@@ -2901,100 +3428,19 @@ export function useClassroomEngine() {
         }
 
         if (safeComment.trim() && doorCrowdRef.current.length > 0) {
-          const now = Date.now();
-          const pool = doorCrowdRef.current;
-          const poolLen = pool.length;
-
-          // Ưu tiên 1: Học sinh trong nhóm cửa lớp đã mang tên người này
-          let targetIdx = pool.findIndex(
-            (s) => s.username.trim().toLowerCase() === lowerUser
-          );
-
-          // Ưu tiên 2: Chọn ngẫu nhiên 1 học sinh trong nhóm cửa lớp đang rảnh (đã tắt bong bóng chat)
-          if (targetIdx < 0) {
-            const freeIndices: number[] = [];
-            for (let i = 0; i < poolLen; i++) {
-              if (!pool[i].chatBubbleUntil || pool[i].chatBubbleUntil! <= now) {
-                freeIndices.push(i);
-              }
-            }
-            if (freeIndices.length > 0) {
-              targetIdx =
-                freeIndices[Math.floor(Math.random() * freeIndices.length)];
-            }
-          }
-
-          // Ưu tiên 3: Nếu tất cả đều đang hiện bong bóng, chọn người có bong bóng sắp tắt nhất (cũ nhất)
-          if (targetIdx < 0) {
-            let oldestIdx = 0;
-            let oldestUntil = Infinity;
-            for (let i = 0; i < poolLen; i++) {
-              const until = pool[i].chatBubbleUntil || 0;
-              if (until < oldestUntil) {
-                oldestUntil = until;
-                oldestIdx = i;
-              }
-            }
-            targetIdx = oldestIdx;
-          }
-
-          doorCrowdCursorRef.current = (targetIdx + 1) % poolLen;
-          const chosenDoorStudent = pool[targetIdx];
-          const bubbleUntil =
-            now + (cfg.chatBubbleDurationSec || 12) * 1000;
           const resolvedGender = resolveUserGender(
             safeName,
             genderCmd || opts.gender
           );
-
-          const nextPool = pool.map((s, idx) =>
-            idx === targetIdx
-              ? {
-                  ...s,
-                  username: safeName,
-                  prayer: safeComment,
-                  gender: resolvedGender,
-                  avatarUrl: opts.avatarUrl || s.avatarUrl,
-                  hasComment: true,
-                  stateTimer: 0,
-                  chatBubbleUntil: bubbleUntil,
-                }
-              : s
-          );
-          doorCrowdRef.current = nextPool;
-          setDoorCrowd(nextPool);
-
-          const cleanSpeechComment = sanitizeAndLimitSpeechText(
-            safeComment,
-            cfg.maxTtsWords || 25
-          );
-          const shouldSpeakOutsideComment =
-            cfg.ttsEnabled &&
-            safety.allowTTS &&
-            !cfg.ttsVipOnly &&
-            ((!opts.isBot && cfg.realPrayerTtsEnabled) ||
-              (opts.isBot && cfg.npcPrayerTtsEnabled)) &&
-            Boolean(cleanSpeechComment);
-
-          if (shouldSpeakOutsideComment) {
-            const tpl = pickRandomTemplate(
-              cfg.prayerTtsTemplates,
-              cfg.realPrayerTtsTemplate ||
-                'Bạn [Tên] giơ tay phát biểu: [Comment]'
-            );
-            const speech = soundEngine.formatEventTemplate(
-              tpl,
-              safeName,
-              cleanSpeechComment,
-              cfg.maxTtsWords
-            );
-            soundEngine.enqueueTTS(speech, !opts.isBot, cfg, {
-              pilgrimId: chosenDoorStudent.id,
-              username: safeName,
-              reason: 'comment',
-              isBot: opts.isBot,
-            });
-          }
+          enqueueDoorCrowdChat({
+            username: safeName,
+            lowerUser,
+            comment: safeComment,
+            gender: resolvedGender,
+            avatarUrl: opts.avatarUrl,
+            isBot: opts.isBot,
+            allowTTS: safety.allowTTS,
+          });
         }
         return false;
       }
@@ -3075,11 +3521,32 @@ export function useClassroomEngine() {
       }
 
       // Đi nhanh từ cửa chính bên trái (LEFT_DOOR_POS = { x: 46, y: 500 }) vào ghế trong khoảng ~3.5s (trước khi hết 7s còn lại của pha kết quả)
+      // Khi chuyển từ hàng chờ vào lớp: đồng bộ số điểm qua bảng điểm lớp (lotusDonors) nhưng combo (correctStreak) reset về 0
+      const queuedPts = Number((opts as { points?: number }).points || 0);
+      if (isAdmittingFromQueue && queuedPts > 0) {
+        setLotusDonors((prev) => {
+          const idx = prev.findIndex(
+            (d) => d.username.trim().toLowerCase() === lowerUser
+          );
+          if (idx >= 0) {
+            if (prev[idx].coins >= queuedPts) return prev;
+            const updated = [...prev];
+            updated[idx] = { ...updated[idx], coins: queuedPts };
+            return updated.sort((a, b) => b.coins - a.coins);
+          }
+          return [...prev, { username: safeName, coins: queuedPts }].sort(
+            (a, b) => b.coins - a.coins
+          );
+        });
+      }
+
       const newStudent: PilgrimData = {
         id,
         username: safeName,
         prayer: safeComment,
-        gender: resolveUserGender(safeName, genderCmd || opts.gender),
+        gender: opts.isBot
+          ? resolveBalancedNpcGender(safeName, 'class', genderCmd || opts.gender)
+          : resolveUserGender(safeName, genderCmd || opts.gender),
         isVip: false,
         isBot: opts.isBot,
         coins: 0,
@@ -3115,6 +3582,10 @@ export function useClassroomEngine() {
         isGoldenPriority: Boolean(
           (opts as { isGoldenPriority?: boolean }).isGoldenPriority
         ),
+        hasShield: Boolean(
+          (opts as { hasShield?: boolean }).hasShield || opts.coins >= 5
+        ),
+        correctStreak: 0,
         answeredCurrentQuestion: false,
         quizResultStatus: null,
         quizResultUntil: 0,
@@ -3272,70 +3743,71 @@ export function useClassroomEngine() {
             };
           }
 
-          const zoneSpanX = Math.max(40, zone.maxX - zone.minX);
-          const rightEdgeMinX = zone.maxX - Math.max(38, zoneSpanX * 0.22);
+          const zoneSpanX = Math.max(24, zone.maxX - zone.minX);
+          const zoneSpanY = Math.max(8, zone.maxY - zone.minY);
+          const gentleSpeed = m.role === 'abbot' ? 22 : 20;
+
+          x = Math.max(zone.minX, Math.min(zone.maxX, x));
+          y = Math.max(zone.minY, Math.min(zone.maxY, y));
+          targetX = Math.max(zone.minX, Math.min(zone.maxX, targetX));
+          targetY = Math.max(zone.minY, Math.min(zone.maxY, targetY));
 
           if (pauseTimer > 0) {
             pauseTimer -= dt;
+            moveAxis = 'idle';
             if (pauseTimer <= 0) {
-              if (m.role === 'abbot') {
-                // Cô Giáo đi ngẫu nhiên trong vùng giáo viên nhưng ưu tiên về phía bên phải cùng của vùng
-                const biasRight = x < rightEdgeMinX ? 0.72 : 0.45;
-                if (Math.random() < biasRight) {
-                  targetX =
-                    zone.maxX -
-                    8 -
-                    Math.random() * Math.min(34, zoneSpanX * 0.18);
-                } else {
-                  targetX =
-                    zone.minX +
-                    18 +
-                    Math.random() * Math.max(30, zoneSpanX - 36);
-                }
-              } else {
-                // Thầy Giám Thị đi tuần tra ngẫu nhiên trong vùng Giám Thị
-                targetX =
-                  zone.minX +
-                  16 +
-                  Math.random() * Math.max(28, zoneSpanX - 32);
-              }
+              pauseTimer = 0;
+              // Chọn điểm đến tiếp theo trong vùng di chuyển riêng của Cô Thảo / Thầy Tùng
+              const padX = Math.min(12, zoneSpanX * 0.15);
+              const padY = Math.min(4, zoneSpanY * 0.15);
+              targetX =
+                zone.minX +
+                padX +
+                Math.random() * Math.max(8, zoneSpanX - padX * 2);
               targetY =
                 zone.minY +
-                6 +
-                Math.random() * Math.max(12, zone.maxY - zone.minY - 12);
-              moveAxis = Math.random() < 0.78 ? 'x' : 'y';
+                padY +
+                Math.random() * Math.max(4, zoneSpanY - padY * 2);
+              moveAxis = 'x';
+              if (Math.abs(targetX - x) > 2) {
+                facingLeft = targetX < x;
+              }
             }
-            return { ...m, name: expectedName, pauseTimer, animTime };
+            return {
+              ...m,
+              name: expectedName,
+              x,
+              y,
+              targetX,
+              targetY,
+              moveAxis,
+              facingLeft,
+              pauseTimer,
+              animTime,
+            };
           }
 
-          if (moveAxis === 'x') {
+          if (moveAxis === 'x' || moveAxis === 'y') {
             const dx = targetX - x;
-            if (Math.abs(dx) <= 3) {
-              const isAtRightEdge = m.role === 'abbot' && x >= rightEdgeMinX;
-              pauseTimer = isAtRightEdge
-                ? 6.5 + Math.random() * 5.0
-                : 1.6 + Math.random() * 1.9;
-              if (isAtRightEdge) facingLeft = true;
-              moveAxis = 'idle';
-            } else {
-              const step = Math.sign(dx) * m.speed * dt;
-              x += step;
-              facingLeft = dx < 0;
-            }
-          } else if (moveAxis === 'y') {
             const dy = targetY - y;
-            if (Math.abs(dy) <= 3) {
-              const isAtRightEdge = m.role === 'abbot' && x >= rightEdgeMinX;
-              pauseTimer = isAtRightEdge
-                ? 6.0 + Math.random() * 4.5
-                : 1.5 + Math.random() * 1.8;
+            const dist = Math.hypot(dx, dy);
+            if (dist <= 3) {
+              x = targetX;
+              y = targetY;
               moveAxis = 'idle';
+              // Đứng vài giây (3.0s - 5.5s) rồi tiếp tục di chuyển từ từ
+              pauseTimer = 3.0 + Math.random() * 2.5;
             } else {
-              y += Math.sign(dy) * (m.speed * 0.75) * dt;
+              const step = Math.min(dist, gentleSpeed * dt);
+              x += (dx / dist) * step;
+              y += (dy / dist) * step;
+              if (Math.abs(dx) > 1.5) {
+                facingLeft = dx < 0;
+              }
             }
           } else {
-            const isAtRightEdge = m.role === 'abbot' && x >= rightEdgeMinX;
-            pauseTimer = isAtRightEdge ? 6.0 : 1.8;
+            moveAxis = 'idle';
+            pauseTimer = 2.5 + Math.random() * 2.0;
           }
 
           return {
@@ -3484,12 +3956,22 @@ export function useClassroomEngine() {
               stateTimer = 0;
             }
           } else if (state === 'walk_to_teacher_gift') {
-            // Học sinh cầm hoa đi vuông góc từ bàn ra lối đi dọc -> lên bục giảng (hoặc tới cạnh Thầy Giám Thị)
+            // Học sinh cầm hoa trước ngực đi tới vị trí bên cạnh Giáo viên (cạnh trái hoặc phải, không chạm giáo viên)
             const moveSpeed = cfg.studentGiftSpeed ?? Math.max(p.speed, 185);
-            const targetPos = p.giftTargetPos || {
-              x: cfg.incenseBurner.x,
-              y: cfg.incenseBurner.y,
-            };
+            const liveTeacher =
+              monksRef.current.find(
+                (m) => m.role === (p.giftTargetRole || 'abbot')
+              ) || monksRef.current[0];
+            const targetPos = liveTeacher
+              ? getTeacherSideGiftPos(
+                  liveTeacher.x,
+                  liveTeacher.y,
+                  p.slotX || x
+                )
+              : p.giftTargetPos || {
+                  x: cfg.incenseBurner.x,
+                  y: cfg.incenseBurner.y,
+                };
             const walkCorridorY =
               p.giftTargetRole === 'senior_novice' ? targetPos.y : 478;
 
@@ -3526,22 +4008,23 @@ export function useClassroomEngine() {
               p.flowerBurstsDoneCount = 0;
               isCarryingGift = totalFlowers > 1;
 
-              // Bắn đóa hoa đầu tiên bay từ vị trí học sinh sang vị trí Cô Giáo / Thầy Giám Thị
+              // Bắn model bông hoa bay từ trước ngực học sinh sang vị trí của Cô Giáo / Thầy Giám Thị
               const targetTeacher =
                 monksRef.current.find(
                   (m) => m.role === (p.giftTargetRole || 'abbot')
                 ) || monksRef.current[0];
               const teacherX = targetTeacher ? targetTeacher.x : targetPos.x;
               const teacherY = targetTeacher
-                ? targetTeacher.y - 16
-                : targetPos.y - 20;
+                ? targetTeacher.y - 26
+                : targetPos.y - 26;
+              facingLeft = teacherX < x;
 
               setFlyingFlowers((prev) => [
                 ...prev.slice(-12),
                 {
                   id: `ff_${Date.now()}_1_${p.id}`,
                   startX: x,
-                  startY: y - 16,
+                  startY: y - 26,
                   targetX: teacherX,
                   targetY: teacherY,
                   createdAt: Date.now(),
@@ -3560,7 +4043,8 @@ export function useClassroomEngine() {
               monksRef.current.find((m) => m.role === targetRole) ||
               monksRef.current[0];
             const teacherX = targetTeacher ? targetTeacher.x : x;
-            const teacherY = targetTeacher ? targetTeacher.y - 16 : y - 20;
+            const teacherY = targetTeacher ? targetTeacher.y - 26 : y - 26;
+            facingLeft = teacherX < x;
 
             // Nếu có Combo (totalFlowers >= 3) -> Ném 3 đóa hoa liên tiếp (tại 0s, 0.18s, 0.36s)
             if (totalFlowers >= 3 && stateTimer >= 0.18 && thrownCount < 2) {
@@ -3570,7 +4054,7 @@ export function useClassroomEngine() {
                 {
                   id: `ff_${Date.now()}_2_${p.id}`,
                   startX: x,
-                  startY: y - 16,
+                  startY: y - 26,
                   targetX: teacherX - 6,
                   targetY: teacherY - 4,
                   createdAt: Date.now(),
@@ -3587,7 +4071,7 @@ export function useClassroomEngine() {
                 {
                   id: `ff_${Date.now()}_3_${p.id}`,
                   startX: x,
-                  startY: y - 16,
+                  startY: y - 26,
                   targetX: teacherX + 6,
                   targetY: teacherY + 3,
                   createdAt: Date.now(),
@@ -3673,12 +4157,13 @@ export function useClassroomEngine() {
                     ? 'abbot'
                     : 'senior_novice';
                   const nextNpc = monksRef.current.find((m) => m.role === nextRole);
-                  const nextTargetX = isForTeacherNext
-                    ? Math.max(84, Math.min(456, (nextNpc?.x ?? 270) - 26))
-                    : Math.max(40, Math.min(480, (nextNpc?.x ?? 46) + 26));
-                  const nextTargetY = isForTeacherNext
-                    ? (nextNpc?.y ?? 438) + 8
-                    : (nextNpc?.y ?? 502) + 4;
+                  const sideNextPos = getTeacherSideGiftPos(
+                    nextNpc?.x ?? (isForTeacherNext ? 360 : 130),
+                    nextNpc?.y ?? (isForTeacherNext ? 444 : 498),
+                    p.slotX || x
+                  );
+                  const nextTargetX = sideNextPos.x;
+                  const nextTargetY = sideNextPos.y;
 
                   soundEngine.playGiftEventSound(nextFlowerAct.giftId, cfg);
                   isCarryingGift = true;
@@ -3832,6 +4317,12 @@ export function useClassroomEngine() {
             }
           }
 
+          // Nếu học sinh đang ngồi ổn định tại bàn (pray_seated): luôn bám đúng tọa độ ghế (slotX, slotY) khi chỉnh khoảng cách 2 học sinh cùng bàn hoặc kéo bàn
+          if (state === 'pray_seated' && Boolean(p.slotId)) {
+            x = p.slotX;
+            y = p.slotY;
+          }
+
           // Nếu học sinh đang ngồi ổn định tại bàn (pray_seated) và đã hết thời gian bận của quà trước -> kiểm tra hàng chờ quà tặng tuần tự!
           if (
             state === 'pray_seated' &&
@@ -3895,10 +4386,20 @@ export function useClassroomEngine() {
             const moveSpeed = cfg.studentGiftSpeed ?? Math.max(r.speed, 205);
 
             if (state === 'walk_to_teacher_gift') {
-              const targetPos = r.giftTargetPos || {
-                x: cfg.incenseBurner.x,
-                y: cfg.incenseBurner.y,
-              };
+              const liveTeacher =
+                monksRef.current.find(
+                  (m) => m.role === (r.giftTargetRole || 'abbot')
+                ) || monksRef.current[0];
+              const targetPos = liveTeacher
+                ? getTeacherSideGiftPos(
+                    liveTeacher.x,
+                    liveTeacher.y,
+                    r.slotX || x
+                  )
+                : r.giftTargetPos || {
+                    x: cfg.incenseBurner.x,
+                    y: cfg.incenseBurner.y,
+                  };
               const walkCorridorY =
                 r.giftTargetRole === 'senior_novice' ? targetPos.y : 478;
 
@@ -3934,15 +4435,16 @@ export function useClassroomEngine() {
                   ) || monksRef.current[0];
                 const teacherX = targetTeacher ? targetTeacher.x : targetPos.x;
                 const teacherY = targetTeacher
-                  ? targetTeacher.y - 16
-                  : targetPos.y - 20;
+                  ? targetTeacher.y - 26
+                  : targetPos.y - 26;
+                facingLeft = teacherX < x;
 
                 setFlyingFlowers((prev) => [
                   ...prev.slice(-12),
                   {
                     id: `ff_det_1_${Date.now()}_${r.id}`,
                     startX: x,
-                    startY: y - 16,
+                    startY: y - 26,
                     targetX: teacherX,
                     targetY: teacherY,
                     createdAt: Date.now(),
@@ -3961,7 +4463,8 @@ export function useClassroomEngine() {
                 monksRef.current.find((m) => m.role === targetRole) ||
                 monksRef.current[0];
               const teacherX = targetTeacher ? targetTeacher.x : x;
-              const teacherY = targetTeacher ? targetTeacher.y - 16 : y - 20;
+              const teacherY = targetTeacher ? targetTeacher.y - 26 : y - 26;
+              facingLeft = teacherX < x;
 
               if (totalFlowers >= 3 && stateTimer >= 0.18 && thrownCount < 2) {
                 thrownCount = 2;
@@ -3970,7 +4473,7 @@ export function useClassroomEngine() {
                   {
                     id: `ff_det_2_${Date.now()}_${r.id}`,
                     startX: x,
-                    startY: y - 16,
+                    startY: y - 26,
                     targetX: teacherX - 6,
                     targetY: teacherY - 4,
                     createdAt: Date.now(),
@@ -3987,7 +4490,7 @@ export function useClassroomEngine() {
                   {
                     id: `ff_det_3_${Date.now()}_${r.id}`,
                     startX: x,
-                    startY: y - 16,
+                    startY: y - 26,
                     targetX: teacherX + 6,
                     targetY: teacherY + 3,
                     createdAt: Date.now(),
@@ -4098,7 +4601,9 @@ export function useClassroomEngine() {
                   ...qr,
                   x: crowdPos.x,
                   y: crowdPos.y,
-                  chatBubbleUntil: Date.now() + 6000,
+                  hasComment: false,
+                  chatBubbleUntil: 0,
+                  giftActionHighlightUntil: Date.now() + 6000,
                   floatingScoreUntil: Date.now() + 3400,
                 });
               } else {
@@ -4251,6 +4756,71 @@ export function useClassroomEngine() {
         }
 
         return remainingPigs;
+      });
+
+      // 3B. Cập nhật đàn Mèo nhảy từ bàn xuống đất đi vòng vòng lớp rồi đi ra cửa biến mất
+      setRoamingCats((prevCats) => {
+        if (prevCats.length === 0) return prevCats;
+        const remainingCats: RoamingCatAgent[] = [];
+        for (const cat of prevCats) {
+          let {
+            x,
+            y,
+            jumpProgress,
+            waypointIndex,
+            facingLeft,
+            animTime,
+          } = cat;
+          animTime += dt;
+
+          if (jumpProgress < 1) {
+            jumpProgress = Math.min(1, jumpProgress + dt * 2.3);
+            x = cat.jumpFromX + (cat.jumpToX - cat.jumpFromX) * jumpProgress;
+            y = cat.jumpFromY + (cat.jumpToY - cat.jumpFromY) * jumpProgress;
+            facingLeft = cat.jumpToX < cat.jumpFromX;
+            remainingCats.push({
+              ...cat,
+              x,
+              y,
+              jumpProgress,
+              facingLeft,
+              animTime,
+            });
+            continue;
+          }
+
+          const wp = cat.waypoints[waypointIndex];
+          if (!wp) continue;
+
+          const dx = wp.x - x;
+          const dy = wp.y - y;
+          const dist = Math.hypot(dx, dy);
+          if (dist > 5) {
+            const step = Math.min(dist, cat.speed * dt);
+            x += (dx / dist) * step;
+            y += (dy / dist) * step;
+            if (Math.abs(dx) > 1) {
+              facingLeft = dx < 0;
+            }
+          } else {
+            x = wp.x;
+            y = wp.y;
+            waypointIndex += 1;
+          }
+
+          if (waypointIndex < cat.waypoints.length) {
+            remainingCats.push({
+              ...cat,
+              x,
+              y,
+              jumpProgress: 1,
+              waypointIndex,
+              facingLeft,
+              animTime,
+            });
+          }
+        }
+        return remainingCats;
       });
 
       if (freedSlotIds.length > 0) {
@@ -4445,6 +5015,7 @@ export function useClassroomEngine() {
         Boolean(p.answeredCurrentQuestion) ||
         p.quizResultStatus === 'correct' ||
         classWinnerSet.has(lowerName);
+      const savedByShield = Boolean(p.savedByShieldInCurrentRound);
       const wasPunishedStanding =
         Boolean(p.isPunishedInCurrentRound) ||
         p.state === 'stand_punishment' ||
@@ -4453,10 +5024,15 @@ export function useClassroomEngine() {
         (item) => item.username.trim().toLowerCase() === lowerName
       );
 
-      if (answeredRight || (hasPendingPunishment && !wasPunishedStanding)) {
+      if (
+        answeredRight ||
+        savedByShield ||
+        (hasPendingPunishment && !wasPunishedStanding)
+      ) {
         if (wasPunishedStanding) {
           return {
             ...p,
+            savedByShieldInCurrentRound: false,
             isPunishedInCurrentRound: false,
             punishmentMultiplier: undefined,
             punishmentSpotPos: undefined,
@@ -4465,7 +5041,10 @@ export function useClassroomEngine() {
             stateTimer: 0,
           };
         }
-        return p;
+        return {
+          ...p,
+          savedByShieldInCurrentRound: false,
+        };
       }
 
       if (p.slotId) {
@@ -4501,6 +5080,8 @@ export function useClassroomEngine() {
           pendingGiftCoins: 0,
           answeredCurrentQuestion: false,
           hasDeskCat: false,
+          deskCatCount: 0,
+          hasDeskPig: false,
           hasDeskSnack: false,
           hasPcGamingDesk: false,
           richKidDanceUntil: 0,
@@ -4550,6 +5131,8 @@ export function useClassroomEngine() {
           pendingGiftCoins: 0,
           answeredCurrentQuestion: false,
           hasDeskCat: false,
+          deskCatCount: 0,
+          hasDeskPig: false,
           hasDeskSnack: false,
           hasPcGamingDesk: false,
           richKidDanceUntil: 0,
@@ -4576,6 +5159,8 @@ export function useClassroomEngine() {
         hasComment: false,
         chatBubbleUntil: 0,
         hasDeskCat: false,
+        deskCatCount: 0,
+        hasDeskPig: false,
         hasDeskSnack: false,
         hasPcGamingDesk: false,
         richKidDanceUntil: 0,
@@ -4732,7 +5317,7 @@ export function useClassroomEngine() {
           .slice(2, 6)}`,
         username: chosenName,
         prayer: 'vào lớp',
-        gender: resolveUserGender(chosenName),
+        gender: resolveBalancedNpcGender(chosenName, 'queue'),
         isVip: false,
         coins: 0,
         isBot: true,
@@ -4747,7 +5332,7 @@ export function useClassroomEngine() {
     }
 
     recomputeWaitingQueueLazy();
-  }, [recomputeWaitingQueueLazy, resolveUserGender]);
+  }, [recomputeWaitingQueueLazy, resolveBalancedNpcGender]);
 
   // Lên lịch cho TẤT CẢ học sinh NPC (cả trong lớp VÀ trong Hàng Chờ) comment trả lời câu hỏi trải đều trong 10s đầu (không đồng thanh)
   // Dựa theo tỉ lệ `npcCorrectAnswerPercent`: Trả lời đúng (từ tiếng Anh ngắn gọn) hoặc nói vẩn vơ (trích danh sách phát biểu)
@@ -4832,31 +5417,38 @@ export function useClassroomEngine() {
               ? curCfg.npcCorrectAnswerPercent
               : 65;
           const willAnswerRight = Math.random() * 100 < correctRate;
-
-          const prayers =
-            npcPrayersRef.current.length > 0
-              ? npcPrayersRef.current
-              : SAMPLE_PRAYERS;
-          const targetEnLower = quizItem.en.toLowerCase().trim();
-          const safeWrongPool = prayers.filter(
-            (line) => !line.toLowerCase().includes(targetEnLower)
-          );
-          const poolToPick =
-            safeWrongPool.length > 0 ? safeWrongPool : prayers;
-          const ramblingComment =
-            poolToPick[Math.floor(Math.random() * poolToPick.length)] ||
-            'Câu này khó quá cô ơi 🤔';
           const shortAnswer = formatShortQuizAnswer(quizItem.en);
+          const typoAnswer = buildTypoQuizAnswer(quizItem.en);
 
-          // Trường hợp 1: NPC đang nằm trong Hàng Chờ Vào Lớp -> hiện chat box trên 1 người ngẫu nhiên ở nhóm cửa lớp và chấm điểm Học Ké
+          // Khi NPC trả lời sai: Im lặng (không chat) HOẶC chat câu trả lời nhưng đảo ngẫu nhiên vị trí 2 chữ cái liền nhau -> hệ thống tự nhận diện là trả lời sai
+          const scatterDensity = Math.max(
+            0,
+            Math.min(100, curCfg.npcScatterChatDensity ?? 50)
+          );
+          const wrongTypoSpeakChance =
+            scatterDensity <= 0
+              ? 0.35
+              : Math.max(0.25, Math.min(0.85, 0.25 + (scatterDensity / 100) * 0.55));
+          const shouldSpeakWrongTypo = Math.random() < wrongTypoSpeakChance;
+
+          // Trường hợp 1: NPC đang nằm trong Hàng Chờ Vào Lớp -> chat câu trả lời đúng như người thật (hoặc im lặng / đảo 2 chữ liền nhau nếu sai)
           if (bot.kind === 'queue') {
             const lowerBotName = bot.username.trim().toLowerCase();
             const stillInQueue = waitingPoolRef.current.get(lowerBotName);
-            if (!stillInQueue || !stillInQueue.isBot) return;
+            if (
+              !stillInQueue ||
+              !stillInQueue.isBot ||
+              stillInQueue.answeredCorrectInRound
+            ) {
+              return;
+            }
 
-            const chosenComment = willAnswerRight
-              ? shortAnswer
-              : ramblingComment;
+            if (!willAnswerRight && !shouldSpeakWrongTypo) {
+              // Im lặng -> hệ thống tự tính là không trả lời đúng
+              return;
+            }
+
+            const chosenComment = willAnswerRight ? shortAnswer : typoAnswer;
             spawnOrPromotePilgrim({
               username: stillInQueue.username,
               prayer: chosenComment,
@@ -4870,7 +5462,7 @@ export function useClassroomEngine() {
             return;
           }
 
-          // Trường hợp 2: NPC đang ngồi trong lớp
+          // Trường hợp 2: NPC đang ngồi trong lớp -> chat câu trả lời đúng như người thật (hoặc im lặng / đảo 2 chữ liền nhau nếu sai)
           const targetBot = pilgrimsRef.current.find(
             (p) =>
               p.id === bot.id &&
@@ -4882,70 +5474,27 @@ export function useClassroomEngine() {
           );
           if (!targetBot) return;
 
-          if (willAnswerRight) {
-            const nextPilgrims = pilgrimsRef.current.map((p) =>
-              p.id === targetBot.id
-                ? {
-                    ...p,
-                    prayer: shortAnswer,
-                    hasComment: true,
-                    answeredCurrentQuestion: true,
-                    chatBubbleUntil:
-                      Date.now() + (curCfg.chatBubbleDurationSec || 12) * 1000,
-                  }
-                : p
-            );
-            pilgrimsRef.current = nextPilgrims;
-            setPilgrims(nextPilgrims);
-            checkEnglishQuizAnswer(
-              targetBot.username,
-              shortAnswer,
-              true,
-              targetBot.avatarUrl
-            );
-          } else {
-            const nextPilgrims = pilgrimsRef.current.map((p) =>
-              p.id === targetBot.id
-                ? {
-                    ...p,
-                    prayer: ramblingComment,
-                    hasComment: true,
-                    answeredCurrentQuestion: false,
-                    chatBubbleUntil:
-                      Date.now() + (curCfg.chatBubbleDurationSec || 12) * 1000,
-                  }
-                : p
-            );
-            pilgrimsRef.current = nextPilgrims;
-            setPilgrims(nextPilgrims);
-
-            if (curCfg.ttsEnabled && curCfg.npcPrayerTtsEnabled) {
-              const tpl = pickRandomTemplate(
-                curCfg.prayerTtsTemplates,
-                curCfg.npcPrayerTtsTemplate ||
-                  'Bạn [Tên] giơ tay phát biểu: [Comment]'
-              );
-              const speech = soundEngine.formatEventTemplate(
-                tpl,
-                targetBot.username,
-                ramblingComment,
-                curCfg.maxTtsWords
-              );
-              soundEngine.enqueueTTS(speech, false, curCfg, {
-                pilgrimId: targetBot.id,
-                username: targetBot.username,
-                reason: 'comment',
-                isBot: true,
-              });
-            }
+          if (!willAnswerRight && !shouldSpeakWrongTypo) {
+            // Im lặng -> hết giờ hệ thống tự nhận diện là trả lời sai
+            return;
           }
+
+          const chosenClassAnswer = willAnswerRight ? shortAnswer : typoAnswer;
+          spawnOrPromotePilgrim({
+            username: targetBot.username,
+            prayer: chosenClassAnswer,
+            gender: targetBot.gender,
+            isVip: false,
+            coins: 0,
+            isBot: true,
+            avatarUrl: targetBot.avatarUrl,
+          });
         }, delayMs);
 
         quizNpcTimersRef.current.push(timerId);
       });
     },
     [
-      checkEnglishQuizAnswer,
       clearQuizNpcTimers,
       getActiveQuizList,
       spawnOrPromotePilgrim,
@@ -5051,12 +5600,28 @@ export function useClassroomEngine() {
     spawnOrPromotePilgrim,
   ]);
 
-  // Định kỳ cho Học sinh NPC (trong lớp VÀ trong Hàng Chờ) phát biểu câu từ Danh sách phát biểu
+  // Hệ thống NPC trong lớp và NPC trong Hàng Chờ phát biểu rải rác tự nhiên theo "Mật độ rải chat" (npcScatterChatDensity: 0%..100%)
+  const nextClassScatterAtRef = useRef<number>(Date.now() + 2600);
+  const nextQueueScatterAtRef = useRef<number>(Date.now() + 1800);
+
   useEffect(() => {
+    const computeScatterDelayMs = (densityPercent: number) => {
+      const clamped = Math.max(1, Math.min(100, densityPercent));
+      const norm = clamped / 100; // 0.01 .. 1.0
+      // Mật độ 100% -> trung bình ~1.7s; Mật độ 50% -> trung bình ~4.6s; Mật độ 10% -> trung bình ~11.5s
+      const baseMs = 1350 + Math.pow(1 - norm, 1.4) * 11200;
+      // Dao động ngẫu nhiên rộng (0.35x .. 1.65x) để các câu chat rải rác tự nhiên, không bị đều nhịp
+      return Math.round(baseMs * (0.35 + Math.random() * 1.3));
+    };
+
     const timer = setInterval(() => {
       const cfg = configRef.current;
       if (!cfg.autoCrowd) return;
 
+      const density = Math.max(0, Math.min(100, cfg.npcScatterChatDensity ?? 50));
+      if (density <= 0) return;
+
+      const now = Date.now();
       const prayers =
         npcPrayersRef.current.length > 0 ? npcPrayersRef.current : SAMPLE_PRAYERS;
       const bState = classBoardStateRef.current;
@@ -5067,74 +5632,62 @@ export function useClassroomEngine() {
         bState.isRunning &&
         bState.phase === 'asking';
 
-      // 1. Cho phép NPC trong Hàng Chờ phát biểu (trích list phát biểu) -> hiện chat box trên 1 người ngẫu nhiên ở cửa lớp
-      const queuedBots = waitingQueueRef.current.filter((q) => q.isBot);
-      if (queuedBots.length > 0) {
-        const chosenQueued =
-          queuedBots[Math.floor(Math.random() * queuedBots.length)];
-        const queueComment =
-          prayers[Math.floor(Math.random() * prayers.length)];
-        spawnOrPromotePilgrim({
-          username: chosenQueued.username,
-          prayer: queueComment,
-          gender: chosenQueued.gender,
-          isVip: false,
-          coins: 0,
-          isBot: true,
-          avatarUrl: chosenQueued.avatarUrl,
-          allowDoorCrowdBubbleForBot: true,
-        });
-      }
-
-      // 2. Cho phép NPC đang ngồi trong lớp phát biểu (khi không đang trong 15s hỏi bài)
+      // Khi đang trong thời gian trả lời câu hỏi trên bảng, NPC chỉ tập trung trả lời câu hỏi (đúng / im lặng / đảo 2 chữ cái)
       if (isQuizAsking) {
         return;
       }
 
-      const seatedBots = pilgrimsRef.current.filter(
-        (p) => p.isBot && p.state === 'pray_seated'
-      );
-      if (seatedBots.length === 0) return;
+      // 1. Rải chat độc lập cho NPC trong Hàng Chờ -> hiện chat box trên 1 học sinh ở cửa lớp
+      if (now >= nextQueueScatterAtRef.current) {
+        nextQueueScatterAtRef.current = now + computeScatterDelayMs(density);
+        const queuedBots = waitingQueueRef.current.filter((q) => q.isBot);
+        if (queuedBots.length > 0) {
+          const chosenQueued =
+            queuedBots[Math.floor(Math.random() * queuedBots.length)];
+          const queueComment =
+            prayers[Math.floor(Math.random() * prayers.length)];
+          spawnOrPromotePilgrim({
+            username: chosenQueued.username,
+            prayer: queueComment,
+            gender: chosenQueued.gender,
+            isVip: false,
+            coins: 0,
+            isBot: true,
+            avatarUrl: chosenQueued.avatarUrl,
+            allowDoorCrowdBubbleForBot: true,
+          });
+        }
+      }
 
-      const chosen = seatedBots[Math.floor(Math.random() * seatedBots.length)];
-      const nextComment = prayers[Math.floor(Math.random() * prayers.length)];
-
-      const nextPilgrims = pilgrimsRef.current.map((p) =>
-        p.id === chosen.id
-          ? {
-              ...p,
-              prayer: nextComment,
-              hasComment: true,
-              chatBubbleUntil:
-                Date.now() + (cfg.chatBubbleDurationSec || 12) * 1000,
-            }
-          : p
-      );
-      pilgrimsRef.current = nextPilgrims;
-      setPilgrims(nextPilgrims);
-
-      if (cfg.ttsEnabled && cfg.npcPrayerTtsEnabled) {
-        const tpl = pickRandomTemplate(
-          cfg.prayerTtsTemplates,
-          cfg.npcPrayerTtsTemplate || 'Bạn [Tên] giơ tay phát biểu: [Comment]'
+      // 2. Rải chat độc lập cho NPC đang ngồi trong lớp (ưu tiên bạn chưa hiện bong bóng chat để rải đều khắp lớp)
+      if (now >= nextClassScatterAtRef.current) {
+        nextClassScatterAtRef.current = now + computeScatterDelayMs(density);
+        const seatedBots = pilgrimsRef.current.filter(
+          (p) => p.isBot && p.state === 'pray_seated'
         );
-        const speech = soundEngine.formatEventTemplate(
-          tpl,
-          chosen.username,
-          nextComment,
-          cfg.maxTtsWords
+        if (seatedBots.length === 0) return;
+
+        const idleBubbleBots = seatedBots.filter(
+          (p) => !p.chatBubbleUntil || p.chatBubbleUntil <= now
         );
-        soundEngine.enqueueTTS(speech, false, cfg, {
-          pilgrimId: chosen.id,
+        const pool = idleBubbleBots.length > 0 ? idleBubbleBots : seatedBots;
+        const chosen = pool[Math.floor(Math.random() * pool.length)];
+        const nextComment = prayers[Math.floor(Math.random() * prayers.length)];
+
+        spawnOrPromotePilgrim({
           username: chosen.username,
-          reason: 'comment',
+          prayer: nextComment,
+          gender: chosen.gender,
+          isVip: false,
+          coins: 0,
           isBot: true,
+          avatarUrl: chosen.avatarUrl,
         });
       }
-    }, Math.max(2000, (config.npcPrayIntervalSec || 6.5) * 1000));
+    }, 350);
 
     return () => clearInterval(timer);
-  }, [config.npcPrayIntervalSec, spawnOrPromotePilgrim]);
+  }, [spawnOrPromotePilgrim]);
 
   // Đồng bộ cấu hình engine, bộ câu hỏi & thời gian câu hỏi (mặc định 12s cho Luồng 2 & 3) vào classBoardState khi người dùng chỉnh trong Studio
   useEffect(() => {
@@ -5221,8 +5774,13 @@ export function useClassroomEngine() {
         // Luồng 1: Thời gian cố định 3s
         shouldAdvance = nextLeft <= 0;
       } else if (prev.phase === 'asking') {
-        // Luồng 2 & 3: Thời gian tính chung (mặc định 12s)
-        shouldAdvance = nextLeft <= 0;
+        // Luồng 2 & 3: Thời gian tính chung (mặc định 12s), có bộ lọc an toàn nếu Cô đang đọc dở câu nói vu vơ ở Luồng 3 thì chờ đọc nốt mới chuyển sang Luồng 4
+        const waitingForIdleChatFinish =
+          Boolean(prev.idleChatTriggered) &&
+          Boolean(prev.activeFlowToken) &&
+          !prev.ttsFinishedForPhase &&
+          nextElapsed < prev.totalDurationMs + 9000;
+        shouldAdvance = nextLeft <= 0 && !waitingForIdleChatFinish;
       } else if (prev.phase === 'answer_flash') {
         // Luồng 4: Nói xong chuyển luồng next (hiển thị hiệu ứng đáp án tối thiểu 1.8s)
         shouldAdvance =
@@ -5245,6 +5803,8 @@ export function useClassroomEngine() {
           nextLeft <= 0;
       }
 
+      const cfg = configRef.current;
+
       if (!shouldAdvance) {
         // Trong Luồng 2 & 3: sau 2.8s đầu đọc đề, tự động chuyển nhãn sang Luồng 3 (Đợi trả lời / Gợi ý) nếu chưa chuyển
         const nextStepNum =
@@ -5254,9 +5814,52 @@ export function useClassroomEngine() {
             ? 3
             : prev.lessonStepNumber;
 
+        let nextIdleTriggered = prev.idleChatTriggered;
+        let nextActiveToken = prev.activeFlowToken;
+        let nextTtsFinished = prev.ttsFinishedForPhase;
+
+        // Luồng 3: Cho cô nói 1 câu vu vơ ngẫu nhiên trong lúc chờ trả lời sau thời gian trễ cài đặt
+        const idleDelayMs =
+          Math.max(1, Number(cfg.lessonIdleChatDelaySec ?? 4)) * 1000;
+        if (
+          prev.phase === 'asking' &&
+          !prev.idleChatTriggered &&
+          cfg.lessonIdleChatEnabled !== false &&
+          nextElapsed >= idleDelayMs &&
+          nextLeft >= 900
+        ) {
+          const idlePool = Array.isArray(cfg.lessonIdleChatTexts)
+            ? cfg.lessonIdleChatTexts.map((s) => (s || '').trim()).filter(Boolean)
+            : [];
+          nextIdleTriggered = true;
+          if (idlePool.length > 0) {
+            const randomIdleText =
+              idlePool[Math.floor(Math.random() * idlePool.length)];
+            const idleToken = `flow_idle3_${Date.now()}_${prev.questionIndex}`;
+            const enqueuedIdle = soundEngine.enqueueLessonFlowItems(
+              [
+                {
+                  text: randomIdleText,
+                  lang: 'vi',
+                  lessonFlowToken: idleToken,
+                  lessonStepLabel: 'Luồng 3: Câu nói vu vơ',
+                },
+              ],
+              cfg
+            );
+            if (enqueuedIdle) {
+              nextActiveToken = idleToken;
+              nextTtsFinished = false;
+            }
+          }
+        }
+
         const tickState: ClassBoardRuntimeState = {
           ...prev,
           lessonStepNumber: nextStepNum,
+          idleChatTriggered: nextIdleTriggered,
+          activeFlowToken: nextActiveToken,
+          ttsFinishedForPhase: nextTtsFinished,
           timeLeftMs: nextLeft,
           elapsedPhaseMs: nextElapsed,
         };
@@ -5265,7 +5868,6 @@ export function useClassroomEngine() {
         return;
       }
 
-      const cfg = configRef.current;
       const quizList = getActiveQuizList(cfg);
       const curQuiz =
         quizList[prev.questionIndex % quizList.length] || quizList[0];
@@ -5275,7 +5877,7 @@ export function useClassroomEngine() {
       // ============================================================================
       if (prev.phase === 'lesson_start') {
         const prepDurMs = Math.max(1, cfg.lessonPrepareDurationSec || 3) * 1000;
-        const prepSpeech = cfg.lessonPrepareTtsText || 'Chuẩn bị';
+        const prepSpeech = pickRandomLessonPrepSpeech(cfg);
 
         soundEngine.playWoodenFish(cfg.ttsVolume * 0.65);
         soundEngine.enqueueLessonFlowItems(
@@ -5295,6 +5897,7 @@ export function useClassroomEngine() {
           lessonStepNumber: 1,
           activeFlowToken: undefined,
           ttsFinishedForPhase: false,
+          idleChatTriggered: false,
           elapsedPhaseMs: 0,
           timeLeftMs: prepDurMs,
           totalDurationMs: prepDurMs,
@@ -5370,6 +5973,7 @@ export function useClassroomEngine() {
           lessonStepNumber: 2,
           activeFlowToken: undefined,
           ttsFinishedForPhase: false,
+          idleChatTriggered: false,
           elapsedPhaseMs: 0,
           timeLeftMs: askDurMs,
           totalDurationMs: askDurMs,
@@ -5422,22 +6026,61 @@ export function useClassroomEngine() {
           const earnedPts = classWinnerMap.get(lowerName);
           const isRight =
             Boolean(p.answeredCurrentQuestion) || earnedPts !== undefined;
-          if (!isRight) {
-            resetUsers.add(lowerName);
+
+          if (isRight) {
+            const donorItem = lotusDonorsRef.current.find(
+              (d) => d.username.trim().toLowerCase() === lowerName
+            );
+            const totalScoreNow = donorItem ? donorItem.coins : earnedPts || 5;
+            // Không hiển thị thẻ điểm / text cộng điểm ở Luồng 4, đợi sang Luồng 5 (Bảng kết quả) mới hiển thị đồng loạt
+            return {
+              ...p,
+              correctStreak: (p.correctStreak || 0) + 1,
+              savedByShieldInCurrentRound: false,
+              answeredCurrentQuestion: true,
+              quizResultStatus: 'correct' as const,
+              quizResultUntil: badgeUntil,
+              quizEarnedPoints: earnedPts || 5,
+              currentScoreDisplay: totalScoreNow,
+            };
           }
+
+          // Trả lời sai: reset chuỗi combo câu đúng liên tiếp về 0.
+          // Nếu học sinh đang có Khiên bảo vệ (hasShield) -> Mất khiên và được bảo vệ giữ lại chỗ ngồi & điểm số!
+          if (p.hasShield) {
+            const nowShield = Date.now();
+            return {
+              ...p,
+              hasShield: false,
+              savedByShieldInCurrentRound: true,
+              correctStreak: 0,
+              answeredCurrentQuestion: false,
+              quizResultStatus: 'wrong' as const,
+              quizResultUntil: badgeUntil,
+              quizEarnedPoints: 0,
+              floatingScoreText: '🛡️ Đỡ bằng Khiên!',
+              floatingScoreColor: 'gold' as const,
+              floatingScoreUntil: nowShield + 3600,
+              floatingScoreKey: nowShield,
+            };
+          }
+
+          resetUsers.add(lowerName);
           return {
             ...p,
-            coins: isRight ? p.coins : 0,
-            pendingGiftCoins: isRight ? p.pendingGiftCoins : 0,
-            hasDeskCat: isRight ? p.hasDeskCat : false,
-            hasDeskSnack: isRight ? p.hasDeskSnack : false,
-            hasPcGamingDesk: isRight ? p.hasPcGamingDesk : false,
-            answeredCurrentQuestion: isRight,
-            quizResultStatus: (isRight ? 'correct' : 'wrong') as
-              | 'correct'
-              | 'wrong',
+            correctStreak: 0,
+            savedByShieldInCurrentRound: false,
+            coins: 0,
+            pendingGiftCoins: 0,
+            hasDeskCat: false,
+            deskCatCount: 0,
+            hasDeskPig: false,
+            hasDeskSnack: false,
+            hasPcGamingDesk: false,
+            answeredCurrentQuestion: false,
+            quizResultStatus: 'wrong' as const,
             quizResultUntil: badgeUntil,
-            quizEarnedPoints: isRight ? earnedPts || 5 : 0,
+            quizEarnedPoints: 0,
           };
         });
         pilgrimsRef.current = markedPilgrims;
@@ -5512,24 +6155,136 @@ export function useClassroomEngine() {
 
         const cWinners = prev.classWinners || [];
         const oWinners = prev.outsideWinners || [];
+
+        // HIỂN THỊ ĐỒNG LOẠT THẺ ĐIỂM + TEXT CỘNG ĐIỂM CHO CÁC HỌC SINH TRONG LỚP TRẢ LỜI ĐÚNG NGAY KHI VÀO LUỒNG 5 (BẢNG KẾT QUẢ)
+        if (cWinners.length > 0) {
+          const nowFlow5 = Date.now();
+          const scoreCardDurMs =
+            Math.max(0.5, cfg.scoreTagDurationSec ?? 4) * 1000;
+          const winnerPointsByLower = new Map<string, number>();
+          cWinners.forEach((w, idx) => {
+            if (w.username) {
+              winnerPointsByLower.set(
+                w.username.trim().toLowerCase(),
+                w.points || getQuizRankPoints(idx + 1)
+              );
+            }
+          });
+          const donorPtsMap5 = new Map<string, number>();
+          lotusDonorsRef.current.forEach((d) => {
+            if (d.username) {
+              donorPtsMap5.set(d.username.trim().toLowerCase(), d.coins || 0);
+            }
+          });
+
+          const popPilgrims = pilgrimsRef.current.map((p) => {
+            const lower = p.username.trim().toLowerCase();
+            const earned =
+              winnerPointsByLower.get(lower) ?? (p.quizEarnedPoints || 0);
+            if (
+              earned > 0 &&
+              p.state !== 'leave_side_to_aisle' &&
+              p.state !== 'leave_down_exit'
+            ) {
+              const totalNow =
+                donorPtsMap5.get(lower) ?? p.currentScoreDisplay ?? earned;
+              return {
+                ...p,
+                currentScoreDisplay: totalNow,
+                scoreChangeDelta: earned,
+                scoreCardUntil: nowFlow5 + scoreCardDurMs,
+                scoreCardKey: nowFlow5 + p.id,
+              };
+            }
+            return p;
+          });
+          pilgrimsRef.current = popPilgrims;
+          setPilgrims(popPilgrims);
+        }
+
         const classRightCount = cWinners.length;
         const outsideRightCount = oWinners.length;
-        const fastestWinner =
-          cWinners[0]?.username ||
-          oWinners[0]?.username ||
-          'chưa có bạn nào';
+        const fastestRawName =
+          cWinners[0]?.username || oWinners[0]?.username || '';
+        const fastestWinner = fastestRawName || 'chưa có bạn nào';
+        const fastestLower = fastestRawName.trim().toLowerCase();
+
+        // Xác định điều kiện câu nói Luồng 5 (normal, streak_2, streak_3, streak_5_plus, streak_broken)
+        const tracker = topStreakTrackerRef.current;
+        const prevFastestLower = tracker.flow5LastFastestUser;
+        const prevFastestDisplay =
+          tracker.flow5LastFastestDisplay || 'bạn dẫn đầu trước đó';
+        const prevStreak = tracker.flow5Streak;
+
+        let activeCond5:
+          | 'normal'
+          | 'streak_2'
+          | 'streak_3'
+          | 'streak_5_plus'
+          | 'streak_broken' = 'normal';
+        let currentFastestStreak = 0;
+
+        if (fastestLower) {
+          if (fastestLower === prevFastestLower) {
+            currentFastestStreak = prevStreak + 1;
+            tracker.flow5Streak = currentFastestStreak;
+            tracker.flow5LastFastestDisplay = fastestRawName;
+            if (currentFastestStreak >= 5) {
+              activeCond5 = 'streak_5_plus';
+            } else if (currentFastestStreak >= 3) {
+              activeCond5 = 'streak_3';
+            } else if (currentFastestStreak === 2) {
+              activeCond5 = 'streak_2';
+            } else {
+              activeCond5 = 'normal';
+            }
+          } else {
+            if (prevFastestLower && prevStreak >= 2) {
+              activeCond5 = 'streak_broken';
+            } else {
+              activeCond5 = 'normal';
+            }
+            currentFastestStreak = 1;
+            tracker.flow5LastFastestUser = fastestLower;
+            tracker.flow5LastFastestDisplay = fastestRawName;
+            tracker.flow5Streak = 1;
+          }
+        }
 
         const defaultResultTpl =
           classRightCount > 0 || outsideRightCount > 0
             ? 'Có [HọcKé] bạn học ké và [TrongLớp] bạn trong lớp trả lời đúng, chúc mừng bạn [Top1] trả lời nhanh nhất!'
             : 'Có 0 bạn học ké và 0 bạn trong lớp trả lời đúng, các em cố gắng ở câu hỏi tiếp theo nhé!';
 
-        const rawResultTpl =
-          classRightCount > 0 || outsideRightCount > 0
-            ? cfg.quizResultTtsTemplate || defaultResultTpl
-            : defaultResultTpl;
+        let chosenResultTpl = defaultResultTpl;
+        if (classRightCount > 0 || outsideRightCount > 0) {
+          const condGroup =
+            cfg.lessonFlow5ConditionalTemplates?.[activeCond5]?.filter((s) =>
+              Boolean(s && s.trim())
+            ) || [];
+          const normalGroup =
+            cfg.lessonFlow5ConditionalTemplates?.normal?.filter((s) =>
+              Boolean(s && s.trim())
+            ) || [];
+          const legacyPool =
+            cfg.quizResultTtsTemplates?.filter((s) => Boolean(s && s.trim())) ||
+            [];
 
-        const summarySpeech = rawResultTpl
+          if (condGroup.length > 0) {
+            chosenResultTpl =
+              condGroup[Math.floor(Math.random() * condGroup.length)];
+          } else if (normalGroup.length > 0) {
+            chosenResultTpl =
+              normalGroup[Math.floor(Math.random() * normalGroup.length)];
+          } else if (legacyPool.length > 0) {
+            chosenResultTpl =
+              legacyPool[Math.floor(Math.random() * legacyPool.length)];
+          } else {
+            chosenResultTpl = cfg.quizResultTtsTemplate || defaultResultTpl;
+          }
+        }
+
+        const summarySpeech = chosenResultTpl
           .replace(/\[HọcKé\]|\{outsideCount\}/gi, String(outsideRightCount))
           .replace(/\[TrongLớp\]|\{classCount\}/gi, String(classRightCount))
           .replace(
@@ -5541,6 +6296,9 @@ export function useClassroomEngine() {
             /\[Top1HọcKé\]/gi,
             oWinners[0]?.username || fastestWinner
           )
+          .replace(/\[ChuỗiTop1\]|\[SốLầnLiênTiếp\]/gi, String(Math.max(1, currentFastestStreak)))
+          .replace(/\[Top1Cũ\]|\[NgườiBịPhá\]/gi, prevFastestDisplay)
+          .replace(/\[ChuỗiCũ\]/gi, String(Math.max(2, prevStreak)))
           .replace(/\[ĐápÁn\]|\{en\}/gi, curQuiz.en)
           .replace(/\[NghĩaViệt\]|\{vi\}/gi, curQuiz.vi);
 
@@ -5623,15 +6381,69 @@ export function useClassroomEngine() {
             10;
         }
 
-        const rankingTpl =
+        const tracker = topStreakTrackerRef.current;
+        const top1Lower = (top1Name || '').trim().toLowerCase();
+        let activeCond6:
+          | 'normal'
+          | 'top1_3'
+          | 'top1_5'
+          | 'top1_10'
+          | 'top1_20'
+          | 'top1_30_plus' = 'normal';
+        let rankStreak = 0;
+
+        if (top1Lower && top1Pts > 0) {
+          if (top1Lower === tracker.flow6LastTop1User) {
+            rankStreak = tracker.flow6Streak + 1;
+          } else {
+            rankStreak = 1;
+            tracker.flow6LastTop1User = top1Lower;
+          }
+          tracker.flow6Streak = rankStreak;
+
+          if (rankStreak >= 30) {
+            activeCond6 = 'top1_30_plus';
+          } else if (rankStreak >= 20) {
+            activeCond6 = 'top1_20';
+          } else if (rankStreak >= 10) {
+            activeCond6 = 'top1_10';
+          } else if (rankStreak >= 5) {
+            activeCond6 = 'top1_5';
+          } else if (rankStreak >= 3) {
+            activeCond6 = 'top1_3';
+          } else {
+            activeCond6 = 'normal';
+          }
+        }
+
+        const defaultRankingTpl =
           cfg.lessonRankingTtsTemplate ||
           'Top 1 bảng xếp hạng là bạn [Top1Rank] với [ĐiểmTop1] điểm, chúng ta đến với câu hỏi tiếp theo nhé!';
 
+        let chosenRankingTpl = defaultRankingTpl;
+        const condGroup6 =
+          cfg.lessonFlow6ConditionalTemplates?.[activeCond6]?.filter((s) =>
+            Boolean(s && s.trim())
+          ) || [];
+        const normalGroup6 =
+          cfg.lessonFlow6ConditionalTemplates?.normal?.filter((s) =>
+            Boolean(s && s.trim())
+          ) || [];
+
+        if (condGroup6.length > 0) {
+          chosenRankingTpl =
+            condGroup6[Math.floor(Math.random() * condGroup6.length)];
+        } else if (normalGroup6.length > 0) {
+          chosenRankingTpl =
+            normalGroup6[Math.floor(Math.random() * normalGroup6.length)];
+        }
+
         const rankingSpeech =
           top1Name && top1Pts > 0
-            ? rankingTpl
+            ? chosenRankingTpl
                 .replace(/\[Top1Rank\]|\[Top1BXH\]|\[Top1\]|\{top1Name\}/gi, top1Name)
                 .replace(/\[ĐiểmTop1\]|\[Điểm\]|\{top1Points\}/gi, String(top1Pts))
+                .replace(/\[ChuỗiTop1Rank\]|\[ChuỗiTop1\]/gi, String(Math.max(1, rankStreak)))
             : 'Bảng xếp hạng trong lớp đang rất gay cấn, chúng ta đến với câu hỏi tiếp theo nhé!';
 
         const flowToken6 = `flow_rank_${Date.now()}_${prev.questionIndex}`;
@@ -5884,7 +6696,7 @@ export function useClassroomEngine() {
         return;
       }
 
-      const prepSpeech = cfg.lessonPrepareTtsText || 'Chuẩn bị';
+      const prepSpeech = pickRandomLessonPrepSpeech(cfg);
       soundEngine.playWoodenFish(cfg.ttsVolume * 0.65);
       soundEngine.enqueueLessonFlowItems(
         [
@@ -5906,6 +6718,7 @@ export function useClassroomEngine() {
         lessonStepNumber: 1,
         activeFlowToken: undefined,
         ttsFinishedForPhase: false,
+        idleChatTriggered: false,
         elapsedPhaseMs: 0,
         timeLeftMs: prepDurMs,
         totalDurationMs: prepDurMs,
@@ -6509,7 +7322,7 @@ export function useClassroomEngine() {
         if (shouldResumeLesson) {
           const prepDurMs =
             Math.max(1, cfg.lessonPrepareDurationSec || 3) * 1000;
-          const prepSpeech = cfg.lessonPrepareTtsText || 'Chuẩn bị';
+          const prepSpeech = pickRandomLessonPrepSpeech(cfg);
           soundEngine.playWoodenFish((cfg.ttsVolume || 1) * 0.65);
           soundEngine.enqueueLessonFlowItems(
             [
@@ -6946,30 +7759,90 @@ export function useClassroomEngine() {
     spawnOrPromotePilgrim,
   ]);
 
-  // Đồng bộ vị trí Học Sinh đang ngồi hoặc đang đi tới bàn khi bàn đôi được di chuyển
+  // Đồng bộ vị trí Học Sinh đang ngồi hoặc đang đi tới bàn khi bàn đôi được di chuyển hoặc chỉnh khoảng cách 2 học sinh cùng bàn
   const syncPilgrimsWithMovedSlots = useCallback((movedSlots: KneelSlot[]) => {
     if (movedSlots.length === 0) return;
     const slotMap = new Map<string, KneelSlot>();
     movedSlots.forEach((s) => slotMap.set(s.id, s));
 
-    setPilgrims((prev) =>
-      prev.map((p) => {
-        if (!p.slotId) return p;
-        const nextSlot = slotMap.get(p.slotId);
-        if (!nextSlot) return p;
-        const isSeated = p.state === 'pray_seated';
-        return {
-          ...p,
-          slotX: nextSlot.x,
-          slotY: nextSlot.y,
-          laneX: nextSlot.aisleX ?? p.laneX,
-          x: isSeated ? nextSlot.x : p.x,
-          y: isSeated ? nextSlot.y : p.y,
-          facingLeft: isSeated ? nextSlot.x < 270 : p.facingLeft,
-        };
-      })
-    );
+    const nextPilgrims = pilgrimsRef.current.map((p) => {
+      if (!p.slotId) return p;
+      const nextSlot = slotMap.get(p.slotId);
+      if (!nextSlot) return p;
+      const isSeated = p.state === 'pray_seated';
+      return {
+        ...p,
+        slotX: nextSlot.x,
+        slotY: nextSlot.y,
+        laneX: nextSlot.aisleX ?? p.laneX,
+        x: isSeated ? nextSlot.x : p.x,
+        y: isSeated ? nextSlot.y : p.y,
+        facingLeft: isSeated ? nextSlot.x < 270 : p.facingLeft,
+      };
+    });
+    pilgrimsRef.current = nextPilgrims;
+    setPilgrims(nextPilgrims);
   }, []);
+
+  // Đồng bộ khoảng cách giữa 2 học sinh ngồi cùng 1 bàn đôi (studentSeatmateGap) ngay khi kéo thanh trượt trong Dev
+  useEffect(() => {
+    const gap = config.studentSeatmateGap ?? 36;
+    const offset = Math.max(4, Math.min(48, Math.round(gap / 2)));
+
+    const updateSlotsForGap = (slots: KneelSlot[], prefix: string): KneelSlot[] => {
+      if (slots.length === 0) return slots;
+      const desks = groupSlotsIntoDoubleDesks(slots, prefix);
+      const updated = [...slots];
+      let hasChange = false;
+
+      desks.forEach((desk) => {
+        const leftX = Math.round(desk.centerX - offset);
+        const rightX = Math.round(desk.centerX + offset);
+        if (updated[desk.leftIndex].x !== leftX) {
+          hasChange = true;
+          updated[desk.leftIndex] = {
+            ...updated[desk.leftIndex],
+            x: leftX,
+            side: leftX < 270 ? 'left' : 'right',
+            deskCenterX: desk.centerX,
+            deskCenterY: desk.centerY,
+            aisleX: Math.max(20, leftX - 24),
+          };
+        }
+        if (desk.rightSlot && updated[desk.rightIndex].x !== rightX) {
+          hasChange = true;
+          updated[desk.rightIndex] = {
+            ...updated[desk.rightIndex],
+            x: rightX,
+            side: rightX < 270 ? 'left' : 'right',
+            deskCenterX: desk.centerX,
+            deskCenterY: desk.centerY,
+            aisleX: Math.min(520, rightX + 24),
+          };
+        }
+      });
+
+      return hasChange ? updated : slots;
+    };
+
+    const nextVip = updateSlotsForGap(vipSlotsRef.current, 'vip');
+    const nextNorm = updateSlotsForGap(normalSlotsRef.current, 'norm');
+    const changedSlots: KneelSlot[] = [];
+
+    if (nextVip !== vipSlotsRef.current) {
+      vipSlotsRef.current = nextVip;
+      setVipSlots(nextVip);
+      changedSlots.push(...nextVip);
+    }
+    if (nextNorm !== normalSlotsRef.current) {
+      normalSlotsRef.current = nextNorm;
+      setNormalSlots(nextNorm);
+      changedSlots.push(...nextNorm);
+    }
+    if (changedSlots.length > 0) {
+      syncPilgrimsWithMovedSlots(changedSlots);
+    }
+  }, [config.studentSeatmateGap, syncPilgrimsWithMovedSlots]);
 
   // Các hàm điều khiển cho Dev Studio
   const handleUpdateConfig = useCallback((patch: Partial<GameConfig>) => {
@@ -7186,7 +8059,7 @@ export function useClassroomEngine() {
     enqueueBatchNpcsAfterQuestion();
 
     if (isRunning) {
-      const prepSpeech = cfg.lessonPrepareTtsText || 'Chuẩn bị';
+      const prepSpeech = pickRandomLessonPrepSpeech(cfg);
       soundEngine.playWoodenFish(cfg.ttsVolume * 0.65);
       soundEngine.enqueueLessonFlowItems(
         [
@@ -7338,7 +8211,8 @@ export function useClassroomEngine() {
         'vip',
         currentDesks.length,
         cfg.grid,
-        cfg.redPrayZones
+        cfg.redPrayZones,
+        cfg.studentSeatmateGap
       );
       const nextVip = [...vipSlotsRef.current, leftSeat, rightSeat];
       const nextVipDesksCount = currentDesks.length + 1;
@@ -7362,7 +8236,8 @@ export function useClassroomEngine() {
         'normal',
         currentDesks.length,
         cfg.grid,
-        cfg.redPrayZones
+        cfg.redPrayZones,
+        cfg.studentSeatmateGap
       );
       const nextNorm = [...normalSlotsRef.current, leftSeat, rightSeat];
       const nextNormDesksCount = currentDesks.length + 1;
@@ -7529,7 +8404,11 @@ export function useClassroomEngine() {
         nextGrid.vipCount = patch.vipDesks * 2;
       }
 
-      const built = buildDoubleDeskSlots(nextGrid, prev.redPrayZones);
+      const built = buildDoubleDeskSlots(
+        nextGrid,
+        prev.redPrayZones,
+        prev.studentSeatmateGap
+      );
       vipSlotsRef.current = built.vipSlots;
       normalSlotsRef.current = built.normalSlots;
       setVipSlots(built.vipSlots);
@@ -7664,7 +8543,13 @@ export function useClassroomEngine() {
         const dy = pos.y - target.y;
         const nextCenterX = Math.max(42, Math.min(498, Math.round(desk.centerX + dx)));
         const nextCenterY = Math.max(140, Math.min(935, Math.round(desk.centerY + dy)));
-        const offset = desk.seatOffset || 18;
+        const offset = Math.max(
+          4,
+          Math.min(
+            48,
+            Math.round((configRef.current.studentSeatmateGap ?? 36) / 2)
+          )
+        );
         const leftX = Math.round(nextCenterX - offset);
         const rightX = Math.round(nextCenterX + offset);
 
@@ -7732,7 +8617,13 @@ export function useClassroomEngine() {
           const hasRight = moveMap.has(desk.rightIndex);
           if (!hasLeft && !hasRight) return;
 
-          const offset = desk.seatOffset || 18;
+          const offset = Math.max(
+            4,
+            Math.min(
+              48,
+              Math.round((configRef.current.studentSeatmateGap ?? 36) / 2)
+            )
+          );
           let nextCenterX = desk.centerX;
           let nextCenterY = desk.centerY;
 
@@ -7826,7 +8717,11 @@ export function useClassroomEngine() {
         left: zoneKey === 'leftPray' ? nextBounds : prev.redPrayZones.left,
         right: zoneKey === 'rightPray' ? nextBounds : prev.redPrayZones.right,
       };
-      const built = buildDoubleDeskSlots(prev.grid, nextRedZones);
+      const built = buildDoubleDeskSlots(
+        prev.grid,
+        nextRedZones,
+        prev.studentSeatmateGap
+      );
       vipSlotsRef.current = built.vipSlots;
       normalSlotsRef.current = built.normalSlots;
       setVipSlots(built.vipSlots);
@@ -8751,6 +9646,7 @@ export function useClassroomEngine() {
     burnerLotusBursts,
     flyingLotuses,
     runningPigs,
+    roamingCats,
     flyingFlowers,
     simpleExplosions,
     eventBarFlashKey,

@@ -16,6 +16,7 @@ import {
   Point2D,
   QueuedPilgrimRequest,
   RectBounds,
+  RoamingCatAgent,
   RunningPigAgent,
   SimpleExplosionFX,
   TempleMonkData,
@@ -31,6 +32,7 @@ import { StudentSprite } from './StudentSprite';
 import { TeacherSprite } from './TeacherSprite';
 import { HudBoxKey, ResizeCorner, StageHud } from './StageHud';
 import {
+  DeskCatModel,
   FallingMoneyModel,
   Flower10BadgeIcon,
   RoseBouquetModel,
@@ -74,6 +76,7 @@ interface GameStageProps {
   burnerLotusBursts: BurnerLotusBurstFX[];
   flyingLotuses: FlyingLotusFX[];
   runningPigs?: RunningPigAgent[];
+  roamingCats?: RoamingCatAgent[];
   flyingFlowers?: FlyingFlowerFX[];
   simpleExplosions?: SimpleExplosionFX[];
   zombieEventState?: ZombieEventRuntimeState;
@@ -283,6 +286,7 @@ export const GameStage: React.FC<GameStageProps> = ({
   burnerLotusBursts,
   flyingLotuses,
   runningPigs = [],
+  roamingCats = [],
   flyingFlowers = [],
   simpleExplosions = [],
   zombieEventState,
@@ -307,6 +311,7 @@ export const GameStage: React.FC<GameStageProps> = ({
   const worldCameraRef = useRef<HTMLDivElement>(null);
   const worldCameraTeacherOverlayRef = useRef<HTMLDivElement>(null);
   const canvasRef = useRef<HTMLCanvasElement>(null);
+  const dustCanvasRef = useRef<HTMLCanvasElement>(null);
   const rainCanvasRef = useRef<HTMLCanvasElement>(null);
   const [scale, setScale] = useState(1);
 
@@ -406,6 +411,9 @@ export const GameStage: React.FC<GameStageProps> = ({
     cameraSmoothSpeed: config.cameraSmoothSpeed ?? 4.5,
     cameraFocusOffsetX: config.cameraFocusOffsetX ?? 0,
     cameraFocusOffsetY: config.cameraFocusOffsetY ?? -40,
+    dustParticleCount: config.dustParticleCount ?? 16,
+    dustParticleOpacity: config.dustParticleOpacity ?? 0.65,
+    dustParticleSize: config.dustParticleSize ?? 1.0,
   });
   fxStateRef.current = {
     incenseBurner: config.incenseBurner,
@@ -422,6 +430,9 @@ export const GameStage: React.FC<GameStageProps> = ({
     cameraSmoothSpeed: config.cameraSmoothSpeed ?? 4.5,
     cameraFocusOffsetX: config.cameraFocusOffsetX ?? 0,
     cameraFocusOffsetY: config.cameraFocusOffsetY ?? -40,
+    dustParticleCount: config.dustParticleCount ?? 16,
+    dustParticleOpacity: config.dustParticleOpacity ?? 0.65,
+    dustParticleSize: config.dustParticleSize ?? 1.0,
   };
 
   const camRigRef = useRef({ x: 270, y: 480, zoom: 1 });
@@ -534,6 +545,9 @@ export const GameStage: React.FC<GameStageProps> = ({
     if (worldCameraTeacherOverlayRef.current) {
       worldCameraTeacherOverlayRef.current.style.transform = camTransform;
     }
+    if (dustCanvasRef.current) {
+      dustCanvasRef.current.style.transform = camTransform;
+    }
   }, []);
 
   useLayoutEffect(() => {
@@ -549,18 +563,20 @@ export const GameStage: React.FC<GameStageProps> = ({
 
   useEffect(() => {
     const canvas = canvasRef.current;
+    const dustCanvas = dustCanvasRef.current;
     const rainCanvas = rainCanvasRef.current;
-    if (!canvas || !rainCanvas) return;
+    if (!canvas || !dustCanvas || !rainCanvas) return;
     const ctx = canvas.getContext('2d');
+    const dustCtx = dustCanvas.getContext('2d');
     const rainCtx = rainCanvas.getContext('2d');
-    if (!ctx || !rainCtx) return;
+    if (!ctx || !dustCtx || !rainCtx) return;
 
-    const floatingDust: FloatingDust[] = Array.from({ length: 14 }, () => ({
-      x: 40 + Math.random() * 460,
-      y: 120 + Math.random() * 380,
+    const floatingDust: FloatingDust[] = Array.from({ length: 80 }, () => ({
+      x: 30 + Math.random() * 480,
+      y: 40 + Math.random() * 580,
       r: 1.2 + Math.random() * 2,
       vy: -8 - Math.random() * 10,
-      alpha: 0.25 + Math.random() * 0.45,
+      alpha: 0.45 + Math.random() * 0.55,
     }));
 
     const rainDrops: Flower10RainDrop[] = Array.from({ length: 46 }, (_, i) => ({
@@ -588,6 +604,7 @@ export const GameStage: React.FC<GameStageProps> = ({
       }
 
       ctx.clearRect(0, 0, canvas.width, canvas.height);
+      dustCtx.clearRect(0, 0, dustCanvas.width, dustCanvas.height);
 
       if (fxStateRef.current.showWaypoints) {
         const curVipDesks = groupSlotsIntoDoubleDesks(fxStateRef.current.vipSlots, 'vip');
@@ -617,18 +634,39 @@ export const GameStage: React.FC<GameStageProps> = ({
         });
       }
 
-      // Hạt bụi phấn lung linh dưới nắng sân trường
-      floatingDust.forEach((sp) => {
-        sp.y += sp.vy * dt;
-        if (sp.y < 80) {
-          sp.y = 440;
-          sp.x = 50 + Math.random() * 440;
+      // Hạt bụi phấn lung linh bay lên (ưu tiên nằm trên tất cả bảng và cả người)
+      const activeDustCount = Math.max(
+        0,
+        Math.min(
+          floatingDust.length,
+          Math.round(fxStateRef.current.dustParticleCount ?? 16)
+        )
+      );
+      const dustOpacityScale = Math.max(
+        0,
+        Math.min(1, fxStateRef.current.dustParticleOpacity ?? 0.65)
+      );
+      const dustSizeScale = Math.max(
+        0.2,
+        Math.min(4, fxStateRef.current.dustParticleSize ?? 1.0)
+      );
+
+      if (activeDustCount > 0 && dustOpacityScale > 0.01) {
+        for (let i = 0; i < activeDustCount; i++) {
+          const sp = floatingDust[i];
+          sp.y += sp.vy * dt;
+          if (sp.y < 30) {
+            sp.y = 620;
+            sp.x = 30 + Math.random() * 480;
+          }
+          const finalAlpha = Math.max(0, Math.min(1, sp.alpha * dustOpacityScale));
+          const finalRadius = Math.max(0.4, sp.r * dustSizeScale);
+          dustCtx.fillStyle = `rgba(254, 249, 195, ${finalAlpha.toFixed(3)})`;
+          dustCtx.beginPath();
+          dustCtx.arc(sp.x, sp.y, finalRadius, 0, Math.PI * 2);
+          dustCtx.fill();
         }
-        ctx.fillStyle = `rgba(254, 249, 195, ${sp.alpha})`;
-        ctx.beginPath();
-        ctx.arc(sp.x, sp.y, sp.r, 0, Math.PI * 2);
-        ctx.fill();
-      });
+      }
 
       // Mưa Hoa Điểm 10 toàn màn hình khi đầy thanh Sự Kiện Lớp Học
       const rainRemainingMs = fxStateRef.current.goldenLotusRainUntil - Date.now();
@@ -1178,287 +1216,350 @@ export const GameStage: React.FC<GameStageProps> = ({
             </div>
           ))}
 
-          {/* Layer 3: Giáo viên chủ nhiệm, Thầy Giám Thị & Học sinh (Cô Giáo ưu tiên nổi trên Bảng Lớp khi teacherAboveClassBoard !== false) */}
-          <div className="absolute inset-0 pointer-events-none z-30">
-            {monks
-              .filter(
-                (m) =>
-                  config.teacherAboveClassBoard === false || m.role !== 'abbot'
-              )
-              .map((m) => (
-                <TeacherSprite
-                  key={m.id}
-                  monk={m}
-                  customAssets={customAssets}
-                  characterScale={config.characterScale ?? 1}
-                  femaleTeacherScale={config.femaleTeacherScale ?? 1}
-                  maleTeacherScale={config.maleTeacherScale ?? 1}
-                  useDefaultPngModels={config.useDefaultPngModels !== false}
-                  nameTagFontFamily={config.nameTagFontFamily}
-                  nameTagScale={config.nameTagScale ?? 1}
-                  chatBubbleFontFamily={config.chatBubbleFontFamily}
-                  chatBubbleScale={config.chatBubbleScale ?? 1}
-                  teacherBubbleScale={config.teacherBubbleScale ?? 1}
-                  supervisorBubbleScale={config.supervisorBubbleScale ?? 1}
-                  isSpeakingBubble={false}
-                />
-              ))}
-
-            {doorCrowd.map((p) => (
-              <StudentSprite
-                key={p.id}
-                pilgrim={p}
-                customAssets={customAssets}
-                characterScale={config.characterScale ?? 1}
-                useDefaultPngModels={config.useDefaultPngModels !== false}
-                nameTagFontFamily={config.nameTagFontFamily}
-                nameTagScale={config.nameTagScale ?? 1}
-                nameTagMaxChars={config.nameTagMaxChars ?? 16}
-                nameTagOffsetY={config.nameTagOffsetY ?? 0}
-                chatBubbleFontFamily={config.chatBubbleFontFamily}
-                chatBubbleScale={config.chatBubbleScale ?? 1}
-                chatBubbleMaxChars={config.chatBubbleMaxChars ?? 80}
-                chatBubbleMaxWidth={config.chatBubbleMaxWidth ?? 195}
-                chatBubbleMaxHeight={config.chatBubbleMaxHeight ?? 110}
-                chatBubbleFontSize={config.chatBubbleFontSize ?? 11}
-                chatBubbleOffsetY={config.chatBubbleOffsetY ?? 0}
-                chatBubbleOffsetX={config.chatBubbleOffsetX ?? 24}
-                isLeftSeatmate={false}
-                isSpeakingBubble={speakingPilgrim?.id === p.id}
-                giftModelScales={config.giftModelScales}
-              />
-            ))}
-
-            {specialFlowerRunners.map((p) => (
-              <StudentSprite
-                key={p.id}
-                pilgrim={p}
-                customAssets={customAssets}
-                characterScale={config.characterScale ?? 1}
-                useDefaultPngModels={config.useDefaultPngModels !== false}
-                nameTagFontFamily={config.nameTagFontFamily}
-                nameTagScale={config.nameTagScale ?? 1}
-                nameTagMaxChars={config.nameTagMaxChars ?? 16}
-                nameTagOffsetY={config.nameTagOffsetY ?? 0}
-                chatBubbleFontFamily={config.chatBubbleFontFamily}
-                chatBubbleScale={config.chatBubbleScale ?? 1}
-                chatBubbleMaxChars={config.chatBubbleMaxChars ?? 80}
-                chatBubbleMaxWidth={config.chatBubbleMaxWidth ?? 195}
-                chatBubbleMaxHeight={config.chatBubbleMaxHeight ?? 110}
-                chatBubbleFontSize={config.chatBubbleFontSize ?? 11}
-                chatBubbleOffsetY={config.chatBubbleOffsetY ?? 0}
-                chatBubbleOffsetX={config.chatBubbleOffsetX ?? 24}
-                isLeftSeatmate={false}
-                isSpeakingBubble={false}
-                giftModelScales={config.giftModelScales}
-              />
-            ))}
-
-            {(() => {
-              const leftSeatIds = new Set<string>();
-              vipDesks.forEach((d) => leftSeatIds.add(d.leftSlot.id));
-              normalDesks.forEach((d) => leftSeatIds.add(d.leftSlot.id));
-              return pilgrims.map((p) => (
-                <StudentSprite
-                  key={p.id}
-                  pilgrim={p}
-                  customAssets={customAssets}
-                  characterScale={config.characterScale ?? 1}
-                  useDefaultPngModels={config.useDefaultPngModels !== false}
-                  nameTagFontFamily={config.nameTagFontFamily}
-                  nameTagScale={config.nameTagScale ?? 1}
-                  nameTagMaxChars={config.nameTagMaxChars ?? 16}
-                  nameTagOffsetY={config.nameTagOffsetY ?? 0}
-                  chatBubbleFontFamily={config.chatBubbleFontFamily}
-                  chatBubbleScale={config.chatBubbleScale ?? 1}
-                  chatBubbleMaxChars={config.chatBubbleMaxChars ?? 80}
-                  chatBubbleMaxWidth={config.chatBubbleMaxWidth ?? 195}
-                  chatBubbleMaxHeight={config.chatBubbleMaxHeight ?? 110}
-                  chatBubbleFontSize={config.chatBubbleFontSize ?? 11}
-                  chatBubbleOffsetY={config.chatBubbleOffsetY ?? 0}
-                  chatBubbleOffsetX={config.chatBubbleOffsetX ?? 24}
-                  isLeftSeatmate={Boolean(
-                    p.slotId && leftSeatIds.has(p.slotId)
-                  )}
-                  isSpeakingBubble={speakingPilgrim?.id === p.id}
-                  giftModelScales={config.giftModelScales}
-                />
-              ));
-            })()}
-
-            {/* Layer 3.1: Đàn Heo chạy hù dọa 5 bạn Top đầu (di chuyển ngang dọc như người) */}
-            {runningPigs.map((pig) => (
-              <div
-                key={pig.id}
-                className="absolute pointer-events-none select-none"
-                style={{
-                  left: `${pig.x}px`,
-                  top: `${pig.y}px`,
-                  transform: `translate(-50%, -80%) translateY(${
-                    Math.abs(Math.sin(pig.animTime * 16)) * -4
-                  }px)`,
-                  zIndex: Math.max(40, Math.floor(pig.y) + 80),
-                }}
-              >
-                <RunningPigModel
-                  customUrl={customAssets.runningPigUrl}
-                  scale={config.giftModelScales?.runningPig ?? 1}
-                  facingLeft={pig.facingLeft}
-                />
-              </div>
-            ))}
-
-            {/* Layer 3.2: Hoa hồng bay từ vị trí học sinh sang vị trí Cô Giáo / Thầy Giám Thị */}
-            {flyingFlowers.map((ff) => {
-              const dx = ff.targetX - ff.startX;
-              const dy = ff.targetY - ff.startY;
-              return (
-                <div
-                  key={ff.id}
-                  className="flying-lotus-projectile absolute pointer-events-none z-90"
-                  style={
-                    {
-                      left: `${ff.startX}px`,
-                      top: `${ff.startY}px`,
-                      '--dx': `${dx}px`,
-                      '--dy': `${dy}px`,
-                    } as React.CSSProperties
-                  }
-                >
-                  <RoseBouquetModel
-                    customUrl={customAssets.roseBouquetUrl}
-                    scale={config.giftModelScales?.roseBouquet ?? 1}
+          {/* Layer 3 (trong worldCameraRef): Chỉ giữ Cô Giáo nếu người dùng cố tình tắt teacherAboveClassBoard trong Dev */}
+          {config.teacherAboveClassBoard === false && (
+            <div className="absolute inset-0 pointer-events-none z-15">
+              {monks
+                .filter((m) => m.role === 'abbot')
+                .map((m) => (
+                  <TeacherSprite
+                    key={m.id}
+                    monk={m}
+                    customAssets={customAssets}
+                    characterScale={config.characterScale ?? 1}
+                    femaleTeacherScale={config.femaleTeacherScale ?? 1}
+                    maleTeacherScale={config.maleTeacherScale ?? 1}
+                    useDefaultPngModels={config.useDefaultPngModels !== false}
+                    nameTagFontFamily={config.nameTagFontFamily}
+                    nameTagScale={config.nameTagScale ?? 1}
+                    chatBubbleFontFamily={config.chatBubbleFontFamily}
+                    chatBubbleScale={config.chatBubbleScale ?? 1}
+                    teacherBubbleScale={config.teacherBubbleScale ?? 1}
+                    supervisorBubbleScale={config.supervisorBubbleScale ?? 1}
+                    isSpeakingBubble={false}
+                    walkWobbleIntensity={config.walkWobbleIntensity ?? 1}
                   />
-                </div>
-              );
-            })}
-
-            {/* Layer 3.3: Hiệu ứng nổ hoa (khi tặng hoa Cô/Thầy) & nổ heo đơn giản (khi heo đụng Top 5) */}
-            {simpleExplosions.map((exp) => (
-              <div
-                key={exp.id}
-                className="absolute pointer-events-none z-95"
-                style={{
-                  left: `${exp.x}px`,
-                  top: `${exp.y}px`,
-                }}
-              >
-                {exp.kind === 'flower' ? (
-                  <div className="relative flex items-center justify-center">
-                    {[0, 45, 90, 135, 180, 225, 270, 315].map((deg, idx) => {
-                      const rad = (deg * Math.PI) / 180;
-                      const dist = idx % 2 === 0 ? 38 : 26;
-                      const tx = Math.round(Math.cos(rad) * dist);
-                      const ty = Math.round(Math.sin(rad) * dist - 10);
-                      return (
-                        <span
-                          key={deg}
-                          className="burner-lotus-particle absolute left-0 top-0 text-sm"
-                          style={
-                            {
-                              '--tx': `${tx}px`,
-                              '--ty': `${ty}px`,
-                              '--rot': `${deg}deg`,
-                            } as React.CSSProperties
-                          }
-                        >
-                          {idx % 2 === 0 ? '🌹' : '💖'}
-                        </span>
-                      );
-                    })}
-                    <span className="w-10 h-10 -translate-x-1/2 -translate-y-1/2 rounded-full bg-rose-400/50 border-2 border-pink-200 animate-ping" />
-                  </div>
-                ) : (
-                  <div className="relative flex items-center justify-center">
-                    {[0, 60, 120, 180, 240, 300].map((deg, idx) => {
-                      const rad = (deg * Math.PI) / 180;
-                      const dist = idx % 2 === 0 ? 36 : 24;
-                      const tx = Math.round(Math.cos(rad) * dist);
-                      const ty = Math.round(Math.sin(rad) * dist - 8);
-                      return (
-                        <span
-                          key={deg}
-                          className="burner-lotus-particle absolute left-0 top-0 text-base"
-                          style={
-                            {
-                              '--tx': `${tx}px`,
-                              '--ty': `${ty}px`,
-                              '--rot': `${deg}deg`,
-                            } as React.CSSProperties
-                          }
-                        >
-                          {idx % 2 === 0 ? '💥' : '💨'}
-                        </span>
-                      );
-                    })}
-                    <span className="w-12 h-12 -translate-x-1/2 -translate-y-1/2 rounded-full bg-orange-500/60 border-2 border-yellow-200 animate-ping" />
-                  </div>
-                )}
-              </div>
-            ))}
-
-            {/* Layer 3.4: Sự kiện Zombie Tấn Công (Nhân vật Zombie + 4 Model Đạn Bay + Spiky Damage -x + Trà sữa Matcha Latte) */}
-            {zombieEntity && zombieEntity.visible && (
-              <ZombieCharacterSprite
-                zombie={zombieEntity}
-                customAssets={customAssets}
-                scale={(config.characterScale ?? 1) * (config.zombieScale ?? 1.15)}
-              />
-            )}
-
-            {zombieProjectiles.map((proj) => (
-              <ZombieProjectileSprite
-                key={proj.id}
-                proj={proj}
-                customAssets={customAssets}
-              />
-            ))}
-
-            {zombieSpikyDamages.map((fx) => (
-              <ZombieSpikyDamageBubble key={fx.id} fx={fx} />
-            ))}
-
-            {flyingMilkTeas.map((tea) => (
-              <FlyingMilkTeaSprite
-                key={tea.id}
-                tea={tea}
-                customAssets={customAssets}
-              />
-            ))}
-          </div>
+                ))}
+            </div>
+          )}
         </div>
 
-        {/* Lớp ưu tiên Cô Giáo & Textbox của cô nằm trên Bảng Lớp (z-25 > classBoardBox z-20) */}
-        {config.teacherAboveClassBoard !== false && (
-          <div
-            ref={worldCameraTeacherOverlayRef}
-            className="absolute inset-0 pointer-events-none z-25 will-change-transform"
-            style={{
-              transformOrigin: '270px 480px',
-            }}
-          >
-            {monks
-              .filter((m) => m.role === 'abbot')
-              .map((m) => (
-                <TeacherSprite
-                  key={`overlay_${m.id}`}
-                  monk={m}
-                  customAssets={customAssets}
-                  characterScale={config.characterScale ?? 1}
-                  femaleTeacherScale={config.femaleTeacherScale ?? 1}
-                  maleTeacherScale={config.maleTeacherScale ?? 1}
-                  useDefaultPngModels={config.useDefaultPngModels !== false}
-                  nameTagFontFamily={config.nameTagFontFamily}
-                  nameTagScale={config.nameTagScale ?? 1}
-                  chatBubbleFontFamily={config.chatBubbleFontFamily}
-                  chatBubbleScale={config.chatBubbleScale ?? 1}
-                  teacherBubbleScale={config.teacherBubbleScale ?? 1}
-                  supervisorBubbleScale={config.supervisorBubbleScale ?? 1}
-                  isSpeakingBubble={false}
+        {/* Lớp Nhân Vật Học Sinh & Giáo Viên luôn nằm trên layer Bảng Lớp (z-25 > classBoardBox z-20) */}
+        <div
+          ref={worldCameraTeacherOverlayRef}
+          className="absolute inset-0 pointer-events-none z-25 will-change-transform"
+          style={{
+            transformOrigin: '270px 480px',
+            transform: 'scale(1) translate(0px, 0px)',
+          }}
+        >
+          {monks
+            .filter(
+              (m) =>
+                config.teacherAboveClassBoard !== false || m.role !== 'abbot'
+            )
+            .map((m) => (
+              <TeacherSprite
+                key={`overlay_${m.id}`}
+                monk={m}
+                customAssets={customAssets}
+                characterScale={config.characterScale ?? 1}
+                femaleTeacherScale={config.femaleTeacherScale ?? 1}
+                maleTeacherScale={config.maleTeacherScale ?? 1}
+                useDefaultPngModels={config.useDefaultPngModels !== false}
+                nameTagFontFamily={config.nameTagFontFamily}
+                nameTagScale={config.nameTagScale ?? 1}
+                chatBubbleFontFamily={config.chatBubbleFontFamily}
+                chatBubbleScale={config.chatBubbleScale ?? 1}
+                teacherBubbleScale={config.teacherBubbleScale ?? 1}
+                supervisorBubbleScale={config.supervisorBubbleScale ?? 1}
+                isSpeakingBubble={false}
+                walkWobbleIntensity={config.walkWobbleIntensity ?? 1}
+              />
+            ))}
+
+          {doorCrowd.map((p) => (
+            <StudentSprite
+              key={p.id}
+              pilgrim={p}
+              customAssets={customAssets}
+              characterScale={config.characterScale ?? 1}
+              useDefaultPngModels={config.useDefaultPngModels !== false}
+              nameTagFontFamily={config.nameTagFontFamily}
+              nameTagScale={config.nameTagScale ?? 1}
+              nameTagMaxChars={config.nameTagMaxChars ?? 16}
+              nameTagOffsetY={config.nameTagOffsetY ?? 0}
+              scoreTagOffsetY={config.scoreTagOffsetY ?? 0}
+              scoreChangeFontSize={config.scoreChangeFontSize ?? 14}
+              scoreChangeStrokeWidth={config.scoreChangeStrokeWidth ?? 2.5}
+              chatBubbleFontFamily={config.chatBubbleFontFamily}
+              chatBubbleScale={config.chatBubbleScale ?? 1}
+              chatBubbleMaxChars={config.chatBubbleMaxChars ?? 80}
+              chatBubbleMaxWidth={config.chatBubbleMaxWidth ?? 195}
+              chatBubbleMaxHeight={config.chatBubbleMaxHeight ?? 110}
+              chatBubbleFontSize={config.chatBubbleFontSize ?? 11}
+              chatBubbleOffsetY={config.chatBubbleOffsetY ?? 0}
+              chatBubbleOffsetX={config.chatBubbleOffsetX ?? 24}
+              isLeftSeatmate={false}
+              isSpeakingBubble={speakingPilgrim?.id === p.id}
+              giftModelScales={config.giftModelScales}
+              walkWobbleIntensity={config.walkWobbleIntensity ?? 1}
+            />
+          ))}
+
+          {specialFlowerRunners.map((p) => (
+            <StudentSprite
+              key={p.id}
+              pilgrim={p}
+              customAssets={customAssets}
+              characterScale={config.characterScale ?? 1}
+              useDefaultPngModels={config.useDefaultPngModels !== false}
+              nameTagFontFamily={config.nameTagFontFamily}
+              nameTagScale={config.nameTagScale ?? 1}
+              nameTagMaxChars={config.nameTagMaxChars ?? 16}
+              nameTagOffsetY={config.nameTagOffsetY ?? 0}
+              scoreTagOffsetY={config.scoreTagOffsetY ?? 0}
+              scoreChangeFontSize={config.scoreChangeFontSize ?? 14}
+              scoreChangeStrokeWidth={config.scoreChangeStrokeWidth ?? 2.5}
+              chatBubbleFontFamily={config.chatBubbleFontFamily}
+              chatBubbleScale={config.chatBubbleScale ?? 1}
+              chatBubbleMaxChars={config.chatBubbleMaxChars ?? 80}
+              chatBubbleMaxWidth={config.chatBubbleMaxWidth ?? 195}
+              chatBubbleMaxHeight={config.chatBubbleMaxHeight ?? 110}
+              chatBubbleFontSize={config.chatBubbleFontSize ?? 11}
+              chatBubbleOffsetY={config.chatBubbleOffsetY ?? 0}
+              chatBubbleOffsetX={config.chatBubbleOffsetX ?? 24}
+              isLeftSeatmate={false}
+              isSpeakingBubble={false}
+              giftModelScales={config.giftModelScales}
+              walkWobbleIntensity={config.walkWobbleIntensity ?? 1}
+            />
+          ))}
+
+          {(() => {
+            const leftSeatIds = new Set<string>();
+            const deskYBySlotId = new Map<string, number>();
+            vipDesks.forEach((d) => {
+              leftSeatIds.add(d.leftSlot.id);
+              deskYBySlotId.set(d.leftSlot.id, d.centerY);
+              if (d.rightSlot) {
+                deskYBySlotId.set(d.rightSlot.id, d.centerY);
+              }
+            });
+            normalDesks.forEach((d) => {
+              leftSeatIds.add(d.leftSlot.id);
+              deskYBySlotId.set(d.leftSlot.id, d.centerY);
+              if (d.rightSlot) {
+                deskYBySlotId.set(d.rightSlot.id, d.centerY);
+              }
+            });
+            return pilgrims.map((p) => (
+              <StudentSprite
+                key={p.id}
+                pilgrim={p}
+                customAssets={customAssets}
+                characterScale={config.characterScale ?? 1}
+                useDefaultPngModels={config.useDefaultPngModels !== false}
+                nameTagFontFamily={config.nameTagFontFamily}
+                nameTagScale={config.nameTagScale ?? 1}
+                nameTagMaxChars={config.nameTagMaxChars ?? 16}
+                nameTagOffsetY={config.nameTagOffsetY ?? 0}
+                scoreTagOffsetY={config.scoreTagOffsetY ?? 0}
+                scoreChangeFontSize={config.scoreChangeFontSize ?? 14}
+                scoreChangeStrokeWidth={config.scoreChangeStrokeWidth ?? 2.5}
+                chatBubbleFontFamily={config.chatBubbleFontFamily}
+                chatBubbleScale={config.chatBubbleScale ?? 1}
+                chatBubbleMaxChars={config.chatBubbleMaxChars ?? 80}
+                chatBubbleMaxWidth={config.chatBubbleMaxWidth ?? 195}
+                chatBubbleMaxHeight={config.chatBubbleMaxHeight ?? 110}
+                chatBubbleFontSize={config.chatBubbleFontSize ?? 11}
+                chatBubbleOffsetY={config.chatBubbleOffsetY ?? 0}
+                chatBubbleOffsetX={config.chatBubbleOffsetX ?? 24}
+                isLeftSeatmate={Boolean(
+                  p.slotId && leftSeatIds.has(p.slotId)
+                )}
+                deskSeatY={
+                  p.slotId ? deskYBySlotId.get(p.slotId) : undefined
+                }
+                isSpeakingBubble={speakingPilgrim?.id === p.id}
+                giftModelScales={config.giftModelScales}
+                walkWobbleIntensity={config.walkWobbleIntensity ?? 1}
+              />
+            ));
+          })()}
+
+          {/* Layer 3.1: Đàn Heo chạy hù dọa 5 bạn Top đầu */}
+          {runningPigs.map((pig) => (
+            <div
+              key={pig.id}
+              className="absolute pointer-events-none select-none"
+              style={{
+                left: `${pig.x}px`,
+                top: `${pig.y}px`,
+                transform: `translate(-50%, -80%) translateY(${
+                  Math.abs(Math.sin(pig.animTime * 16)) * -4
+                }px)`,
+                zIndex: Math.max(40, Math.floor(pig.y) + 80),
+              }}
+            >
+              <RunningPigModel
+                customUrl={customAssets.runningPigUrl}
+                scale={config.giftModelScales?.runningPig ?? 1}
+                facingLeft={pig.facingLeft}
+              />
+            </div>
+          ))}
+
+          {/* Layer 3.1b: Các chú Mèo nhảy từ bàn xuống đất đi vòng vòng lớp rồi ra cửa biến mất (khi bàn đã đủ số mèo tối đa) */}
+          {roamingCats.map((cat) => {
+            const isJumping = cat.jumpProgress < 1;
+            const arcOffsetY = isJumping
+              ? -Math.sin(cat.jumpProgress * Math.PI) * 28
+              : Math.abs(Math.sin(cat.animTime * 14)) * -3.5;
+            const wobbleDeg = isJumping
+              ? (cat.facingLeft ? -14 : 14) * Math.sin(cat.jumpProgress * Math.PI)
+              : Math.sin(cat.animTime * 12) * 4.5;
+            return (
+              <div
+                key={cat.id}
+                className="absolute pointer-events-none select-none"
+                style={{
+                  left: `${cat.x}px`,
+                  top: `${cat.y}px`,
+                  transform: `translate(-50%, -80%) translateY(${arcOffsetY.toFixed(
+                    1
+                  )}px) rotate(${wobbleDeg.toFixed(1)}deg) ${
+                    cat.facingLeft ? 'scaleX(-1)' : ''
+                  }`,
+                  zIndex: Math.max(42, Math.floor(cat.y) + 82),
+                }}
+              >
+                <DeskCatModel
+                  customUrl={customAssets.deskCatUrl}
+                  scale={config.giftModelScales?.deskCat ?? 1}
                 />
-              ))}
-          </div>
-        )}
+              </div>
+            );
+          })}
+
+          {/* Layer 3.2: Hoa hồng bay từ vị trí học sinh sang vị trí Cô Giáo / Thầy Giám Thị */}
+          {flyingFlowers.map((ff) => {
+            const dx = ff.targetX - ff.startX;
+            const dy = ff.targetY - ff.startY;
+            return (
+              <div
+                key={ff.id}
+                className="flying-lotus-projectile absolute pointer-events-none z-90"
+                style={
+                  {
+                    left: `${ff.startX}px`,
+                    top: `${ff.startY}px`,
+                    '--dx': `${dx}px`,
+                    '--dy': `${dy}px`,
+                  } as React.CSSProperties
+                }
+              >
+                <RoseBouquetModel
+                  customUrl={customAssets.roseBouquetUrl}
+                  scale={config.giftModelScales?.roseBouquet ?? 1}
+                />
+              </div>
+            );
+          })}
+
+          {/* Layer 3.3: Hiệu ứng nổ hoa & nổ heo */}
+          {simpleExplosions.map((exp) => (
+            <div
+              key={exp.id}
+              className="absolute pointer-events-none z-95"
+              style={{
+                left: `${exp.x}px`,
+                top: `${exp.y}px`,
+              }}
+            >
+              {exp.kind === 'flower' ? (
+                <div className="relative flex items-center justify-center">
+                  {[0, 45, 90, 135, 180, 225, 270, 315].map((deg, idx) => {
+                    const rad = (deg * Math.PI) / 180;
+                    const dist = idx % 2 === 0 ? 38 : 26;
+                    const tx = Math.round(Math.cos(rad) * dist);
+                    const ty = Math.round(Math.sin(rad) * dist - 10);
+                    return (
+                      <span
+                        key={deg}
+                        className="burner-lotus-particle absolute left-0 top-0 text-sm"
+                        style={
+                          {
+                            '--tx': `${tx}px`,
+                            '--ty': `${ty}px`,
+                            '--rot': `${deg}deg`,
+                          } as React.CSSProperties
+                        }
+                      >
+                        {idx % 2 === 0 ? '🌹' : '💖'}
+                      </span>
+                    );
+                  })}
+                  <span className="w-10 h-10 -translate-x-1/2 -translate-y-1/2 rounded-full bg-rose-400/50 border-2 border-pink-200 animate-ping" />
+                </div>
+              ) : (
+                <div className="relative flex items-center justify-center">
+                  {[0, 60, 120, 180, 240, 300].map((deg, idx) => {
+                    const rad = (deg * Math.PI) / 180;
+                    const dist = idx % 2 === 0 ? 36 : 24;
+                    const tx = Math.round(Math.cos(rad) * dist);
+                    const ty = Math.round(Math.sin(rad) * dist - 8);
+                    return (
+                      <span
+                        key={deg}
+                        className="burner-lotus-particle absolute left-0 top-0 text-base"
+                        style={
+                          {
+                            '--tx': `${tx}px`,
+                            '--ty': `${ty}px`,
+                            '--rot': `${deg}deg`,
+                          } as React.CSSProperties
+                        }
+                      >
+                        {idx % 2 === 0 ? '💥' : '💨'}
+                      </span>
+                    );
+                  })}
+                  <span className="w-12 h-12 -translate-x-1/2 -translate-y-1/2 rounded-full bg-orange-500/60 border-2 border-yellow-200 animate-ping" />
+                </div>
+              )}
+            </div>
+          ))}
+
+          {/* Layer 3.4: Sự kiện Zombie Tấn Công */}
+          {zombieEntity && zombieEntity.visible && (
+            <ZombieCharacterSprite
+              zombie={zombieEntity}
+              customAssets={customAssets}
+              scale={(config.characterScale ?? 1) * (config.zombieScale ?? 1.15)}
+            />
+          )}
+
+          {zombieProjectiles.map((proj) => (
+            <ZombieProjectileSprite
+              key={proj.id}
+              proj={proj}
+              customAssets={customAssets}
+            />
+          ))}
+
+          {zombieSpikyDamages.map((fx) => (
+            <ZombieSpikyDamageBubble key={fx.id} fx={fx} />
+          ))}
+
+          {flyingMilkTeas.map((tea) => (
+            <FlyingMilkTeaSprite
+              key={tea.id}
+              tea={tea}
+              customAssets={customAssets}
+            />
+          ))}
+        </div>
 
         {/* Hiệu ứng khung viền khi đang khóa Camera Zoom vào học sinh */}
         {focusedPilgrim && cameraFocus.reason === 'special_gift' && (
@@ -2027,6 +2128,18 @@ export const GameStage: React.FC<GameStageProps> = ({
           totalSeatCapacity={totalSeatCapacity}
           onStartDragHudBox={handleStartDragHudBox}
           onStartResizeHudBox={handleStartResizeHudBox}
+        />
+
+        {/* Layer 6: Hạt Bụi Phấn Bay Lên (Particle ưu tiên nằm trên tất cả các bảng và cả người) */}
+        <canvas
+          ref={dustCanvasRef}
+          width={540}
+          height={960}
+          className="absolute inset-0 pointer-events-none z-40 will-change-transform"
+          style={{
+            transformOrigin: '270px 480px',
+            transform: 'scale(1) translate(0px, 0px)',
+          }}
         />
       </div>
     </div>

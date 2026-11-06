@@ -73,6 +73,11 @@ export const DEFAULT_GIFT_MODEL_SCALES: GiftModelScalesConfig = {
   pcGamingDesk: 1.0,
   runningPig: 1.0,
   fallingMoney: 1.0,
+  deskCatOffsetX: 0,
+  deskCatOffsetY: 0,
+  snackBagOffsetX: 0,
+  snackBagOffsetY: 0,
+  maxDeskCats: 5,
 };
 
 export interface ClassroomGiftEventMeta {
@@ -114,12 +119,12 @@ export const CLASSROOM_GIFT_EVENTS_META: ClassroomGiftEventMeta[] = [
     id: 'cat',
     coins: 1,
     priceBadge: '(1)',
-    giftLabel: '(1) Con mèo',
+    giftLabel: '(1) Đỉnh (Con mèo)',
     actionTitle: 'Nuôi mèo',
     bonusPoints: 10,
     offeringType: 'cat',
     colorTheme: 'amber',
-    description: '+10đ • Mèo rơi xuống bàn học (sát mép trái/phải theo chỗ ngồi, mất khi sai/không trả lời)',
+    description: '+10đ • Quà Đỉnh (con mèo đưa tay lên like 1 coin) • Mèo rơi xuống bàn học (tối đa 5 con trên bàn)',
   },
   {
     id: 'gg',
@@ -147,12 +152,12 @@ export const CLASSROOM_GIFT_EVENTS_META: ClassroomGiftEventMeta[] = [
     id: 'pig',
     coins: 10,
     priceBadge: '(10)',
-    giftLabel: '(10) Heo',
+    giftLabel: '(10) Chú heo may mắn',
     actionTitle: 'Thả heo hù dọa',
     bonusPoints: 40,
     offeringType: 'pig',
     colorTheme: 'amber',
-    description: '+40đ • Thả 5 con heo chạy ngang dọc tới 5 bạn Top đầu lớp phát nổ và trừ -20đ mỗi người',
+    description: '+40đ • Quà Chú heo may mắn (10 coin) • Thêm 1 heo lên bàn (max 1) & Thả 8 con heo tấn công (-20đ mỗi người)',
   },
   {
     id: 'vip',
@@ -197,13 +202,20 @@ export function resolveClassroomGiftKind(
       return CLASSROOM_GIFT_EVENTS_META[1]; // icecream
     }
     if (
+      name === 'đỉnh' ||
+      name === 'dinh' ||
+      name.includes('đỉnh') ||
+      name.includes('đưa tay lên like') ||
+      name.includes('dua tay len like') ||
       name.includes('mèo') ||
       name.includes('meo') ||
       name.includes('cat') ||
       name.includes('kitten') ||
+      name.includes('thumbs up') ||
+      name.includes('awesome') ||
       name.includes('nuôi mèo')
     ) {
-      return CLASSROOM_GIFT_EVENTS_META[2]; // cat
+      return CLASSROOM_GIFT_EVENTS_META[2]; // cat - Đỉnh (quà con mèo đưa tay lên like 1 coin)
     }
     if (
       name === 'gg' ||
@@ -226,12 +238,18 @@ export function resolveClassroomGiftKind(
       return CLASSROOM_GIFT_EVENTS_META[4]; // heart (5 xu)
     }
     if (
+      name.includes('chú heo may mắn') ||
+      name.includes('chu heo may man') ||
+      name.includes('heo may mắn') ||
+      name.includes('heo may man') ||
+      name.includes('lucky pig') ||
+      name.includes('piggy') ||
       name.includes('heo') ||
       name.includes('pig') ||
       name.includes('lợn') ||
       name.includes('thả heo')
     ) {
-      return CLASSROOM_GIFT_EVENTS_META[5]; // pig (10 xu)
+      return CLASSROOM_GIFT_EVENTS_META[5]; // pig (10 xu - Chú heo may mắn)
     }
     if (
       name.includes('vip') ||
@@ -367,8 +385,10 @@ export function groupSlotsIntoDoubleDesks(
       ? Math.round((leftSlot.y + rightSlot.y) / 2)
       : leftSlot.deskCenterY ?? leftSlot.y;
     const span = rightSlot ? Math.abs(rightSlot.x - leftSlot.x) : 36;
-    const seatOffset = Math.max(14, Math.min(26, Math.round(span / 2) || 18));
-    const width = Math.max(76, Math.min(118, Math.round(span + 44)));
+    const seatOffset = Math.max(4, Math.min(48, Math.round(span / 2) || 18));
+    // Giữ kích thước gốc của bàn cố định (80px), chỉ thay đổi khi chỉnh "Size bàn học" (deskScale),
+    // không bị phình/thu bàn khi chỉnh "Khoảng cách 2 học sinh cùng bàn" (studentSeatmateGap)
+    const width = 80;
 
     desks.push({
       deskId,
@@ -392,7 +412,8 @@ export function groupSlotsIntoDoubleDesks(
  */
 function getClassroomDeskLayoutMetrics(
   grid: GridConfig,
-  zones?: { left: RectBounds; right: RectBounds }
+  zones?: { left: RectBounds; right: RectBounds },
+  seatmateGap?: number
 ) {
   const deskCols = Math.max(
     1,
@@ -414,7 +435,11 @@ function getClassroomDeskLayoutMetrics(
 
   const usableW = Math.max(300, maxX - minX);
   const colBandW = usableW / deskCols;
-  const seatOffset = Math.round(Math.min(22, Math.max(16, colBandW * 0.16)));
+  const defaultOffset = Math.round(Math.min(22, Math.max(16, colBandW * 0.16)));
+  const seatOffset =
+    typeof seatmateGap === 'number' && Number.isFinite(seatmateGap)
+      ? Math.max(4, Math.min(48, Math.round(seatmateGap / 2)))
+      : defaultOffset;
 
   const getDeskColGeometry = (dCol: number) => {
     const safeCol = ((dCol % deskCols) + deskCols) % deskCols;
@@ -445,10 +470,11 @@ export function createSingleDoubleDeskSlots(
   kind: 'vip' | 'normal',
   deskIndex: number,
   grid: GridConfig,
-  zones?: { left: RectBounds; right: RectBounds }
+  zones?: { left: RectBounds; right: RectBounds },
+  seatmateGap?: number
 ): [KneelSlot, KneelSlot] {
   const { deskCols, rows, yTop, yBottom, getDeskColGeometry } =
-    getClassroomDeskLayoutMetrics(grid, zones);
+    getClassroomDeskLayoutMetrics(grid, zones, seatmateGap);
 
   const dCol = deskIndex % deskCols;
   const r = Math.floor(deskIndex / deskCols);
@@ -543,10 +569,11 @@ export function createSingleDoubleDeskSlots(
  */
 export function buildDoubleDeskSlots(
   grid: GridConfig,
-  zones?: { left: RectBounds; right: RectBounds }
+  zones?: { left: RectBounds; right: RectBounds },
+  seatmateGap?: number
 ): { vipSlots: KneelSlot[]; normalSlots: KneelSlot[] } {
   const { deskCols, rows, yTop, yBottom, getDeskColGeometry } =
-    getClassroomDeskLayoutMetrics(grid, zones);
+    getClassroomDeskLayoutMetrics(grid, zones, seatmateGap);
 
   const normalDesksCount =
     typeof grid.normalDesks === 'number'
@@ -786,6 +813,8 @@ export const DEFAULT_CONFIG: GameConfig = {
   answerRevealMp3Title: 'Hiệu ứng mặc định',
 
   giftSoundEnabled: true,
+  giftSoundVolume: 1.0,
+  giftSoundVolumes: {},
   giftSoundMp3Urls: {},
   giftSoundMp3Titles: {},
   giftModelScales: { ...DEFAULT_GIFT_MODEL_SCALES },
@@ -832,9 +861,22 @@ export const DEFAULT_CONFIG: GameConfig = {
   lessonStartTtsText:
     'Chào mừng các em đến với tiết Tiếng Anh lớp 12A1! Các em hãy chú ý lên bảng và bình luận đáp án thật nhanh để giành ghế ngồi trong lớp nhé!',
   lessonPrepareTtsText: 'Chuẩn bị',
+  lessonPrepareTtsTexts: [
+    'Chuẩn bị',
+    'Các em chú ý lên bảng chuẩn bị câu tiếp theo nhé',
+    'Sẵn sàng chưa cả lớp ơi, chuẩn bị nào',
+  ],
   lessonPrepareDurationSec: 3,
   lessonQuestionTtsTemplate:
     'Câu hỏi số [SốCâu]: [NghĩaViệt] tiếng Anh là gì, gồm [SốChữ] chữ cái?',
+  lessonIdleChatEnabled: true,
+  lessonIdleChatDelaySec: 4,
+  lessonIdleChatTexts: [
+    'Câu này dễ lắm luôn đó các em ơi, nhanh tay bình luận nào!',
+    'Cô thấy có nhiều bạn sắp đoán ra đáp án rồi kìa!',
+    'Cố lên cả lớp ơi, nhìn kỹ chữ cái gợi ý trên bảng nhé!',
+    'Bạn nào trả lời nhanh nhất câu này sẽ được cộng nhiều điểm lắm nha!',
+  ],
   lessonAnswerTtsTemplate: 'Đáp án là',
   quizResultTtsEnabled: true,
   quizResultTtsTemplate:
@@ -842,8 +884,51 @@ export const DEFAULT_CONFIG: GameConfig = {
   quizResultTtsTemplates: [
     'Có [HọcKé] bạn học ké và [TrongLớp] bạn trong lớp trả lời đúng, chúc mừng bạn [Top1] trả lời nhanh nhất!',
   ],
+  lessonFlow5ConditionalTemplates: {
+    normal: [
+      'Có [HọcKé] bạn học ké và [TrongLớp] bạn trong lớp trả lời đúng, chúc mừng bạn [Top1] trả lời nhanh nhất!',
+      'Chúc mừng bạn [Top1] đã xuất sắc giật giải nhanh nhất câu này cùng [TrongLớp] bạn trong lớp trả lời đúng!',
+    ],
+    streak_2: [
+      'Quá giỏi! Bạn [Top1] đã trả lời nhanh nhất 2 câu liên tiếp rồi đó cả lớp ơi!',
+      'Hai lần liên tiếp đạt Top 1 tốc độ gọi tên bạn [Top1], phong độ quá đỉnh!',
+    ],
+    streak_3: [
+      'Không thể tin nổi! Bạn [Top1] lập hat-trick 3 lần liên tiếp trả lời nhanh nhất lớp!',
+      'Ba câu liên tục đứng đầu tốc độ! Cả lớp cho bạn [Top1] một tràng pháo tay nào!',
+    ],
+    streak_5_plus: [
+      'Siêu cấp học bá! Bạn [Top1] đã thống trị chuỗi [ChuỗiTop1] câu trả lời nhanh nhất liên tiếp, ai cản nổi bạn đây!',
+      'Kỷ lục xuất thần! [ChuỗiTop1] lần liên tiếp trả lời nhanh nhất đều thuộc về bạn [Top1]!',
+    ],
+    streak_broken: [
+      'Bất ngờ lớn! Bạn [Top1] đã chính thức chấm dứt chuỗi thắng liên tiếp của bạn [Top1Cũ] để vươn lên dẫn đầu câu này!',
+      'Chuỗi bất bại của [Top1Cũ] đã bị phá vỡ! Chúc mừng bạn [Top1] vươn lên trả lời nhanh nhất!',
+    ],
+  },
   lessonRankingTtsTemplate:
     'Top 1 bảng xếp hạng là bạn [Top1Rank] với [ĐiểmTop1] điểm, chúng ta đến với câu hỏi tiếp theo nhé!',
+  lessonFlow6ConditionalTemplates: {
+    normal: [
+      'Top 1 bảng xếp hạng là bạn [Top1Rank] với [ĐiểmTop1] điểm, chúng ta đến với câu hỏi tiếp theo nhé!',
+      'Hiện tại bạn [Top1Rank] đang dẫn đầu lớp với [ĐiểmTop1] điểm, các bạn khác cố gắng bám đuổi nha!',
+    ],
+    top1_3: [
+      'Bạn [Top1Rank] đã giữ vững ngôi đầu bảng xếp hạng 3 vòng liên tiếp với [ĐiểmTop1] điểm!',
+    ],
+    top1_5: [
+      '5 vòng liên tiếp thống trị bảng xếp hạng! Bạn [Top1Rank] đang rất vững vàng ở vị trí Top 1 với [ĐiểmTop1] điểm!',
+    ],
+    top1_10: [
+      'Quá xuất sắc! 10 vòng liên tục không ai vượt qua được bạn [Top1Rank] với [ĐiểmTop1] điểm!',
+    ],
+    top1_20: [
+      'Thống trị tuyệt đối 20 vòng liên tiếp! Ngôi vương lớp 12A1 vẫn thuộc về bạn [Top1Rank] với [ĐiểmTop1] điểm!',
+    ],
+    top1_30_plus: [
+      'Huyền thoại của lớp! Hơn 30 vòng liên tiếp giữ vững Top 1 bảng xếp hạng gọi tên [Top1Rank] với [ĐiểmTop1] điểm!',
+    ],
+  },
   lessonPunishmentSingleTtsTemplate:
     'Mời bạn [Tên] mới quậy trong lớp lên đây đứng 1 lượt!',
   lessonPunishmentMultiTtsTemplate:
@@ -853,9 +938,9 @@ export const DEFAULT_CONFIG: GameConfig = {
   activeQuizDeckId: 'deck-12a1',
   quizQueueLimitDisplay: 10,
   shuffleBeforeEnqueue: false,
-  luckyStarRatio1: 70,
-  luckyStarRatio2: 20,
-  luckyStarRatio3: 10,
+  luckyStarRatio1: 15,
+  luckyStarRatio2: 10,
+  luckyStarRatio3: 5,
 
   studentSeatingSpeed: 110,
   studentGiftSpeed: 185,
@@ -888,6 +973,7 @@ export const DEFAULT_CONFIG: GameConfig = {
   botTargetCrowd: 8,
   botVipPercent: 0,
   npcCorrectAnswerPercent: 65,
+  npcScatterChatDensity: 50,
   npcSpawnIntervalSec: 2.5,
   npcPrayIntervalSec: 6.5,
   prayDurationSec: 24,
@@ -908,15 +994,24 @@ export const DEFAULT_CONFIG: GameConfig = {
 
   deskScale: 1.0,
   studentDeskGap: 24,
+  studentSeatmateGap: 36,
   characterScale: 1.0,
   femaleTeacherScale: 1.0,
   maleTeacherScale: 1.0,
+  walkWobbleIntensity: 1.0,
   useDefaultPngModels: true,
   teacherAboveClassBoard: true,
+  dustParticleCount: 16,
+  dustParticleOpacity: 0.65,
+  dustParticleSize: 1.0,
   nameTagFontFamily: '"Be Vietnam Pro", system-ui, sans-serif',
   nameTagScale: 1.0,
   nameTagMaxChars: 16,
   nameTagOffsetY: 0,
+  scoreTagOffsetY: 0,
+  scoreTagDurationSec: 4,
+  scoreChangeFontSize: 14,
+  scoreChangeStrokeWidth: 2.5,
   chatBubbleFontFamily: '"Be Vietnam Pro", system-ui, sans-serif',
   chatBubbleScale: 1.0,
   chatBubbleDurationSec: 12,
@@ -1041,7 +1136,7 @@ export const DEFAULT_CONFIG: GameConfig = {
     showPilgrimCountBox: true,
     showQueueInPilgrimCountBox: false,
     showWaitingQueueBox: true,
-    showLotusLeaderboardBox: true,
+    showLotusLeaderboardBox: false,
     showGuideBox: true,
     showNoticeBoardBox: false,
     showToastBox: true,

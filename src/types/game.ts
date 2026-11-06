@@ -18,10 +18,10 @@ export type OfferingGiftType =
 export type ClassroomGiftEventId =
   | 'rose'      // (1) Hoa hồng: Tặng hoa cho cô (+10đ)
   | 'icecream'  // (1) Kem: Tặng hoa cho thầy (+10đ)
-  | 'cat'       // (1) Con mèo: Nuôi mèo (+10đ)
+  | 'cat'       // (1) Đỉnh (Con mèo đưa tay lên like 1 coin): Nuôi mèo (+10đ)
   | 'gg'        // (1) GG: Ăn vụn (+10đ)
   | 'heart'     // (5) Bắn tim: Điện thoại reo - Đổi skin bàn PC Gaming (+20đ)
-  | 'pig'       // (10) Heo: Thả heo hù dọa (+40đ, thả 5 heo trừ -20đ 5 bạn top đầu)
+  | 'pig'       // (10) Chú heo may mắn (10 coin): Thả heo hù dọa (+40đ, thêm 1 heo lên bàn max 1, thả 8 heo tấn công)
   | 'vip';      // (10+) VIP: Tôi là Rich Kid (+99đ bản thân, +30đ cả lớp, nhảy trên bàn + mưa tiền 5s)
 
 export interface GiftModelScalesConfig {
@@ -31,10 +31,35 @@ export interface GiftModelScalesConfig {
   pcGamingDesk: number;
   runningPig: number;
   fallingMoney: number;
+  deskCatOffsetX?: number;
+  deskCatOffsetY?: number;
+  snackBagOffsetX?: number;
+  snackBagOffsetY?: number;
+  maxDeskCats?: number;
 }
+
+export type LessonFlow5ConditionKey =
+  | 'normal'
+  | 'streak_2'
+  | 'streak_3'
+  | 'streak_5_plus'
+  | 'streak_broken';
+
+export type LessonFlow5ConditionalTemplates = Record<LessonFlow5ConditionKey, string[]>;
+
+export type LessonFlow6ConditionKey =
+  | 'normal'
+  | 'top1_3'
+  | 'top1_5'
+  | 'top1_10'
+  | 'top1_20'
+  | 'top1_30_plus';
+
+export type LessonFlow6ConditionalTemplates = Record<LessonFlow6ConditionKey, string[]>;
 
 export type GiftSoundMp3Map = Partial<Record<ClassroomGiftEventId, string | null>>;
 export type GiftSoundTitleMap = Partial<Record<ClassroomGiftEventId, string>>;
+export type GiftSoundVolumeMap = Partial<Record<ClassroomGiftEventId, number>>;
 
 export type ZombieProjectileKind =
   | 'pencil_case'
@@ -183,7 +208,18 @@ export interface GuideTaskItem {
   label: string;
   shortDesc: string;
   modelType?: OfferingGiftType | 'none';
-  colorTheme?: 'pink' | 'amber' | 'yellow' | 'emerald' | 'stone' | 'cyan';
+  colorTheme?:
+    | 'yellow'
+    | 'amber'
+    | 'orange'
+    | 'rose'
+    | 'pink'
+    | 'fuchsia'
+    | 'violet'
+    | 'cyan'
+    | 'emerald'
+    | 'lime'
+    | 'stone';
 }
 
 export type ClassBoardEngineId = 'english_quiz' | 'result_board' | 'notice';
@@ -195,7 +231,7 @@ export interface EnglishQuizItem {
   vi: string;
   en: string;
   phonetic?: string;
-  luckyStars?: 1 | 2 | 3;
+  luckyStars?: 0 | 1 | 2 | 3;
   deckName?: string;
 }
 
@@ -246,6 +282,7 @@ export interface ClassBoardRuntimeState {
   outsideWinners?: ClassBoardQuizWinner[];
   showResultEngine?: boolean;
   seatUpdateTriggered?: boolean;
+  idleChatTriggered?: boolean;
 }
 
 export type HudCycleAnimMode = 'slide_right' | 'fade';
@@ -396,6 +433,8 @@ export interface GameConfig {
 
   // Âm thanh khi bắt đầu thực hiện tặng quà (7 món quà sự kiện)
   giftSoundEnabled?: boolean;
+  giftSoundVolume?: number;
+  giftSoundVolumes?: GiftSoundVolumeMap;
   giftSoundMp3Urls?: GiftSoundMp3Map;
   giftSoundMp3Titles?: GiftSoundTitleMap;
 
@@ -430,13 +469,19 @@ export interface GameConfig {
   // Luồng lời nói của Cô Giáo cho Tiết Học (Luồng 0 -> 6) & Bộ câu hỏi tùy chỉnh (.txt)
   lessonStartTtsText?: string;
   lessonPrepareTtsText?: string;
+  lessonPrepareTtsTexts?: string[];
   lessonPrepareDurationSec?: number;
   lessonQuestionTtsTemplate?: string;
+  lessonIdleChatEnabled?: boolean;
+  lessonIdleChatDelaySec?: number;
+  lessonIdleChatTexts?: string[];
   lessonAnswerTtsTemplate?: string;
   quizResultTtsEnabled?: boolean;
   quizResultTtsTemplate?: string;
   quizResultTtsTemplates?: string[];
+  lessonFlow5ConditionalTemplates?: LessonFlow5ConditionalTemplates;
   lessonRankingTtsTemplate?: string;
+  lessonFlow6ConditionalTemplates?: LessonFlow6ConditionalTemplates;
   lessonPunishmentSingleTtsTemplate?: string;
   lessonPunishmentMultiTtsTemplate?: string;
   customQuizQuestions?: EnglishQuizItem[];
@@ -476,6 +521,7 @@ export interface GameConfig {
   botTargetCrowd: number;
   botVipPercent: number;
   npcCorrectAnswerPercent?: number;
+  npcScatterChatDensity?: number;
   npcSpawnIntervalSec: number;
   npcPrayIntervalSec: number;
   prayDurationSec: number;
@@ -496,15 +542,24 @@ export interface GameConfig {
 
   deskScale?: number;
   studentDeskGap?: number;
+  studentSeatmateGap?: number;
   characterScale: number;
   femaleTeacherScale?: number;
   maleTeacherScale?: number;
+  walkWobbleIntensity?: number;
   useDefaultPngModels?: boolean;
   teacherAboveClassBoard?: boolean;
+  dustParticleCount?: number;
+  dustParticleOpacity?: number;
+  dustParticleSize?: number;
   nameTagFontFamily: string;
   nameTagScale: number;
   nameTagMaxChars?: number;
   nameTagOffsetY?: number;
+  scoreTagOffsetY?: number;
+  scoreTagDurationSec?: number;
+  scoreChangeFontSize?: number;
+  scoreChangeStrokeWidth?: number;
   chatBubbleFontFamily: string;
   chatBubbleScale: number;
   chatBubbleDurationSec: number;
@@ -647,6 +702,9 @@ export interface PilgrimData {
   pendingGiftCoins?: number;
   isSimulatedTest?: boolean;
   answeredCurrentQuestion?: boolean;
+  hasShield?: boolean;
+  savedByShieldInCurrentRound?: boolean;
+  correctStreak?: number;
   quizResultStatus?: 'correct' | 'wrong' | null;
   quizResultUntil?: number;
   quizEarnedPoints?: number;
@@ -657,16 +715,24 @@ export interface PilgrimData {
   giftTargetRole?: 'abbot' | 'senior_novice';
   giftActionKind?: ClassroomGiftEventId;
   hasDeskCat?: boolean;
+  deskCatCount?: number;
   deskCatDropAt?: number;
+  hasDeskPig?: boolean;
+  deskPigDropAt?: number;
   hasDeskSnack?: boolean;
   deskSnackDropAt?: number;
   hasPcGamingDesk?: boolean;
   pcGamingDeskAt?: number;
   richKidDanceUntil?: number;
+  giftActionHighlightUntil?: number;
   floatingScoreText?: string;
   floatingScoreColor?: 'green' | 'gold' | 'red';
   floatingScoreUntil?: number;
   floatingScoreKey?: number;
+  currentScoreDisplay?: number;
+  scoreChangeDelta?: number;
+  scoreCardUntil?: number;
+  scoreCardKey?: number;
   punishmentMultiplier?: 3 | 6 | 9;
   punishmentSpotIndex?: number;
   punishmentSpotPos?: Point2D;
@@ -674,6 +740,22 @@ export interface PilgrimData {
   isDetachedFlowerRunner?: boolean;
   leaveAfterGiftAction?: boolean;
   giftActionBusyUntil?: number;
+}
+
+export interface RoamingCatAgent {
+  id: string;
+  x: number;
+  y: number;
+  jumpFromX: number;
+  jumpFromY: number;
+  jumpToX: number;
+  jumpToY: number;
+  jumpProgress: number; // 0..1 khi đang nhảy từ bàn xuống đất
+  waypoints: Point2D[];
+  waypointIndex: number;
+  speed: number;
+  facingLeft: boolean;
+  animTime: number;
 }
 
 export interface RunningPigAgent {
@@ -805,6 +887,7 @@ export interface QueuedPilgrimRequest {
   idleRounds?: number;
   isGoldenPriority?: boolean;
   goldenPriorityAt?: number;
+  hasShield?: boolean;
 }
 
 export type WaitingQueueItem = QueuedPilgrimRequest;

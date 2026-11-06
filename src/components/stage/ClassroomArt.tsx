@@ -16,6 +16,7 @@ import { useProcessedSingleCutout } from '../../services/spriteProcessor';
 import {
   DeskCatModel,
   PcGamingDeskModel,
+  RunningPigModel,
   SchoolGiftArt,
   SnackBagModel,
 } from './SchoolGiftArt';
@@ -524,6 +525,10 @@ export const ClassroomArt: React.FC<ClassroomArtProps> = ({
           0.4,
           Math.min(2.5, giftModelScales?.snackBag ?? 1)
         );
+        const catOffsetX = giftModelScales?.deskCatOffsetX ?? 0;
+        const catOffsetY = giftModelScales?.deskCatOffsetY ?? 0;
+        const snackOffsetX = giftModelScales?.snackBagOffsetX ?? 0;
+        const snackOffsetY = giftModelScales?.snackBagOffsetY ?? 0;
 
         return (
           <div
@@ -625,45 +630,98 @@ export const ClassroomArt: React.FC<ClassroomArtProps> = ({
               </div>
             )}
 
-            {/* Con mèo rơi lên bàn: Ngồi bên trái -> sát cạnh bàn bên trái */}
-            {leftOccupant?.hasDeskCat && (
-              <div
-                key={`cat_left_${leftOccupant.deskCatDropAt || 1}`}
-                className="absolute left-[2%] -top-[6%] z-20 animate-bounce"
-                style={{ animationIterationCount: 2 }}
-              >
-                <DeskCatModel
-                  customUrl={customAssets.deskCatUrl}
-                  scale={catScale}
-                />
-              </div>
-            )}
+            {/* Con mèo rơi lên bàn (hỗ trợ nuôi tối đa maxDeskCats con trên bàn) */}
+            {(() => {
+              const maxCats = Math.max(
+                1,
+                Math.min(5, giftModelScales?.maxDeskCats ?? 5)
+              );
+              const rawLeftCats = leftOccupant?.hasDeskCat
+                ? Math.max(1, leftOccupant.deskCatCount || 1)
+                : 0;
+              const rawRightCats = rightOccupant?.hasDeskCat
+                ? Math.max(1, rightOccupant.deskCatCount || 1)
+                : 0;
+              const effectiveLeftCats = Math.min(maxCats, rawLeftCats);
+              const effectiveRightCats = Math.min(
+                Math.max(0, maxCats - effectiveLeftCats),
+                rawRightCats
+              );
 
-            {/* Con mèo rơi lên bàn: Ngồi bên phải -> sát cạnh bàn bên phải */}
-            {rightOccupant?.hasDeskCat && (
-              <div
-                key={`cat_right_${rightOccupant.deskCatDropAt || 1}`}
-                className="absolute right-[2%] -top-[6%] z-20 animate-bounce"
-                style={{ animationIterationCount: 2 }}
-              >
-                <DeskCatModel
-                  customUrl={customAssets.deskCatUrl}
-                  scale={catScale}
-                />
-              </div>
-            )}
+              return (
+                <>
+                  {Array.from({ length: effectiveLeftCats }, (_, idx) => (
+                    <div
+                      key={`cat_left_${idx}_${
+                        idx === effectiveLeftCats - 1
+                          ? leftOccupant?.deskCatDropAt || 1
+                          : idx
+                      }`}
+                      className="absolute z-20"
+                      style={{
+                        left: `${2 + idx * 17}%`,
+                        top: `${idx % 2 === 0 ? -6 : -11}%`,
+                        transform: `translate(${catOffsetX}px, ${catOffsetY}px)`,
+                      }}
+                    >
+                      <div
+                        className="animate-bounce"
+                        style={{ animationIterationCount: 2 }}
+                      >
+                        <DeskCatModel
+                          customUrl={customAssets.deskCatUrl}
+                          scale={catScale}
+                        />
+                      </div>
+                    </div>
+                  ))}
+                  {Array.from({ length: effectiveRightCats }, (_, idx) => (
+                    <div
+                      key={`cat_right_${idx}_${
+                        idx === effectiveRightCats - 1
+                          ? rightOccupant?.deskCatDropAt || 1
+                          : idx
+                      }`}
+                      className="absolute z-20"
+                      style={{
+                        right: `${2 + idx * 17}%`,
+                        top: `${idx % 2 === 0 ? -6 : -11}%`,
+                        transform: `translate(${catOffsetX}px, ${catOffsetY}px)`,
+                      }}
+                    >
+                      <div
+                        className="animate-bounce"
+                        style={{ animationIterationCount: 2 }}
+                      >
+                        <DeskCatModel
+                          customUrl={customAssets.deskCatUrl}
+                          scale={catScale}
+                        />
+                      </div>
+                    </div>
+                  ))}
+                </>
+              );
+            })()}
 
             {/* Bịch snack rơi lên bàn: Ngồi bên trái -> sát cạnh bàn bên trái */}
             {leftOccupant?.hasDeskSnack && (
               <div
                 key={`snack_left_${leftOccupant.deskSnackDropAt || 1}`}
-                className="absolute left-[14%] top-[4%] z-20 animate-bounce"
-                style={{ animationIterationCount: 2 }}
+                className="absolute left-[14%] top-[4%] z-20"
+                style={{
+                  transform: `translate(${snackOffsetX}px, ${snackOffsetY}px)`,
+                }}
               >
-                <SnackBagModel
-                  customUrl={customAssets.snackBagUrl}
-                  scale={snackScale}
-                />
+                <div
+                  className="animate-bounce"
+                  style={{ animationIterationCount: 2 }}
+                >
+                  <SnackBagModel
+                    customUrl={customAssets.snackBagUrl}
+                    scale={snackScale}
+                  />
+                </div>
               </div>
             )}
 
@@ -671,13 +729,48 @@ export const ClassroomArt: React.FC<ClassroomArtProps> = ({
             {rightOccupant?.hasDeskSnack && (
               <div
                 key={`snack_right_${rightOccupant.deskSnackDropAt || 1}`}
-                className="absolute right-[14%] top-[4%] z-20 animate-bounce"
-                style={{ animationIterationCount: 2 }}
+                className="absolute right-[14%] top-[4%] z-20"
+                style={{
+                  transform: `translate(${snackOffsetX}px, ${snackOffsetY}px)`,
+                }}
               >
-                <SnackBagModel
-                  customUrl={customAssets.snackBagUrl}
-                  scale={snackScale}
-                />
+                <div
+                  className="animate-bounce"
+                  style={{ animationIterationCount: 2 }}
+                >
+                  <SnackBagModel
+                    customUrl={customAssets.snackBagUrl}
+                    scale={snackScale}
+                  />
+                </div>
+              </div>
+            )}
+
+            {/* Con heo rơi lên bàn sau khi tặng quà heo (max: 1 con trên bàn) */}
+            {(leftOccupant?.hasDeskPig || rightOccupant?.hasDeskPig) && (
+              <div
+                key={`pig_desk_${
+                  leftOccupant?.hasDeskPig
+                    ? `left_${leftOccupant.deskPigDropAt || 1}`
+                    : `right_${rightOccupant?.deskPigDropAt || 1}`
+                }`}
+                className={`absolute top-[-6%] z-20 ${
+                  leftOccupant?.hasDeskPig ? 'left-[8%]' : 'right-[8%]'
+                }`}
+              >
+                <div
+                  className="animate-bounce"
+                  style={{ animationIterationCount: 2 }}
+                >
+                  <RunningPigModel
+                    customUrl={customAssets.runningPigUrl}
+                    facingLeft={Boolean(rightOccupant?.hasDeskPig)}
+                    scale={Math.max(
+                      0.4,
+                      Math.min(2.5, (giftModelScales?.runningPig ?? 1) * 0.82)
+                    )}
+                  />
+                </div>
               </div>
             )}
           </div>

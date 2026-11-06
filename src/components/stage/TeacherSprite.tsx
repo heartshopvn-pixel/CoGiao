@@ -28,6 +28,7 @@ interface TeacherSpriteProps {
   teacherBubbleScale?: number;
   supervisorBubbleScale?: number;
   isSpeakingBubble?: boolean;
+  walkWobbleIntensity?: number;
 }
 
 function getTeacherFrameIndex(monk: TempleMonkData): MonkFrameIndex {
@@ -58,6 +59,7 @@ export const TeacherSprite: React.FC<TeacherSpriteProps> = ({
   teacherBubbleScale,
   supervisorBubbleScale,
   isSpeakingBubble = false,
+  walkWobbleIntensity = 1.0,
 }) => {
   const now = Date.now();
 
@@ -101,9 +103,12 @@ export const TeacherSprite: React.FC<TeacherSpriteProps> = ({
     monk.moveAxis === 'chant_wooden_fish' ||
     (monk.woodenFishRippleUntil ? now < monk.woodenFishRippleUntil : false);
 
-  const stepSwing =
-    monk.moveAxis === 'x' || monk.moveAxis === 'y'
-      ? Math.sin(monk.animTime * 8) * 2.5
+  const isWalking = monk.moveAxis === 'x' || monk.moveAxis === 'y';
+  const stepSwing = isWalking ? Math.sin(monk.animTime * 8) * 2.5 : 0;
+  const safeWobble = Math.max(0, walkWobbleIntensity ?? 1);
+  const walkWobbleDeg =
+    isWalking && safeWobble > 0
+      ? Math.sin(monk.animTime * 9.5) * 3.8 * safeWobble
       : 0;
 
   const headTopOffsetPx = Math.round(78 * finalScale) + 6;
@@ -135,10 +140,10 @@ export const TeacherSprite: React.FC<TeacherSpriteProps> = ({
         >
           <div
             style={{ fontFamily: chatBubbleFontFamily }}
-            className={`relative px-2.5 py-1.5 rounded-xl border-2 text-[11px] font-bold leading-snug max-w-[230px] min-w-[115px] text-center break-words transition-all duration-200 ${
+            className={`relative px-2.5 py-1.5 rounded-xl bg-[#fffdf7]/95 text-slate-950 border-2 text-[11px] font-bold leading-snug max-w-[230px] min-w-[115px] text-center break-words transition-all duration-200 ${
               isTeacher
-                ? 'bg-slate-950/95 text-pink-300 border-pink-400 shadow-[0_0_16px_rgba(244,114,182,0.85)]'
-                : 'bg-slate-950/95 text-sky-300 border-sky-400 shadow-[0_0_16px_rgba(56,189,248,0.85)]'
+                ? 'border-pink-400 shadow-[0_0_16px_rgba(244,114,182,0.85)]'
+                : 'border-sky-400 shadow-[0_0_16px_rgba(56,189,248,0.85)]'
             }`}
           >
             <span>
@@ -146,7 +151,7 @@ export const TeacherSprite: React.FC<TeacherSpriteProps> = ({
                 <React.Fragment key={idx}>
                   {part}
                   {idx < arr.length - 1 && (
-                    <span className="inline-flex items-center gap-0.5 text-rose-400 font-extrabold">
+                    <span className="inline-flex items-center gap-0.5 text-rose-500 font-extrabold">
                       <span>/-heart</span>
                       <span className="animate-pulse">❤️</span>
                     </span>
@@ -155,10 +160,8 @@ export const TeacherSprite: React.FC<TeacherSpriteProps> = ({
               ))}
             </span>
             <div
-              className={`w-2.5 h-2.5 rotate-45 mx-auto -mb-3 mt-0.5 border-r-2 border-b-2 ${
-                isTeacher
-                  ? 'bg-slate-950 border-pink-400'
-                  : 'bg-slate-950 border-sky-400'
+              className={`w-2.5 h-2.5 rotate-45 mx-auto -mb-3 mt-0.5 bg-[#fffdf7] border-r-2 border-b-2 ${
+                isTeacher ? 'border-pink-400' : 'border-sky-400'
               }`}
             />
           </div>
@@ -169,7 +172,9 @@ export const TeacherSprite: React.FC<TeacherSpriteProps> = ({
       <div
         className="pointer-events-none select-none"
         style={{
-          transform: `translate(-50%, -88%) scale(${finalScale.toFixed(3)})`,
+          transform: `translate(-50%, -88%) scale(${finalScale.toFixed(3)}) ${
+            walkWobbleDeg !== 0 ? `rotate(${walkWobbleDeg.toFixed(2)}deg)` : ''
+          }`,
           transformOrigin: '50% 88%',
         }}
       >
@@ -191,15 +196,7 @@ export const TeacherSprite: React.FC<TeacherSpriteProps> = ({
             }}
           />
         ) : useDefaultPngModels && processedDefaultTeacherSrc ? (
-          <div
-            className="w-16 h-24 relative flex items-end justify-center"
-            style={{
-              transform:
-                stepSwing !== 0
-                  ? `translateY(${(Math.abs(stepSwing) * -0.7).toFixed(1)}px)`
-                  : undefined,
-            }}
-          >
+          <div className="w-16 h-24 relative flex items-end justify-center">
             <img
               src={processedDefaultTeacherSrc}
               alt={monk.name}

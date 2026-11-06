@@ -245,6 +245,26 @@ export const TabNpc: React.FC<TabNpcProps> = ({
       classBoardState.currentQuestion.en.slice(1).toLowerCase()
     : 'School';
 
+  const currentTypoQuizAnswer = React.useMemo(() => {
+    const clean = currentQuizAnswer.trim();
+    if (clean.length < 2) return `${clean}a`;
+    const chars = clean.split('');
+    for (let i = 0; i < chars.length - 1; i++) {
+      if (
+        /[a-zA-Z]/.test(chars[i]) &&
+        /[a-zA-Z]/.test(chars[i + 1]) &&
+        chars[i].toLowerCase() !== chars[i + 1].toLowerCase()
+      ) {
+        const tmp = chars[i];
+        chars[i] = chars[i + 1];
+        chars[i + 1] = tmp;
+        const swapped = chars.join('');
+        return swapped.charAt(0).toUpperCase() + swapped.slice(1).toLowerCase();
+      }
+    }
+    return `${clean}e`;
+  }, [currentQuizAnswer]);
+
   const handleSendStudentComment = (customText?: string) => {
     const text = (
       typeof customText === 'string' ? customText : studentCommentText
@@ -401,7 +421,15 @@ export const TabNpc: React.FC<TabNpcProps> = ({
                 className="px-1.5 py-0.5 rounded bg-emerald-500/20 hover:bg-emerald-500/35 border border-emerald-400/50 text-[10px] font-bold text-emerald-200 cursor-pointer"
                 title="Ép NPC học sinh này comment đáp án đúng của câu hỏi hiện tại"
               >
-                Đáp án: {currentQuizAnswer}
+                Đúng: {currentQuizAnswer}
+              </button>
+              <button
+                type="button"
+                onClick={() => handleSendStudentComment(currentTypoQuizAnswer)}
+                className="px-1.5 py-0.5 rounded bg-rose-500/20 hover:bg-rose-500/35 border border-rose-400/50 text-[10px] font-bold text-rose-200 cursor-pointer"
+                title="Ép NPC học sinh này comment câu trả lời bị đảo 2 chữ cái liền nhau -> Hệ thống nhận diện là trả lời sai"
+              >
+                Sai (Đảo 2 chữ): {currentTypoQuizAnswer}
               </button>
               <button
                 type="button"
@@ -442,7 +470,7 @@ export const TabNpc: React.FC<TabNpcProps> = ({
         defaultExpandedVoiceConfig={false}
       />
 
-      {/* 1. TẦN SUẤT PHÁT BIỂU & SĨ SỐ HỌC SINH NPC */}
+      {/* 1. MẬT ĐỘ RẢI CHAT & SĨ SỐ HỌC SINH NPC */}
       <div className="bg-stone-900/80 border border-stone-800 rounded-xl p-3 space-y-2.5">
         <div className="flex items-center justify-between border-b border-stone-800 pb-2">
           <div className="flex items-center gap-2">
@@ -462,27 +490,35 @@ export const TabNpc: React.FC<TabNpcProps> = ({
           </label>
         </div>
 
-        {/* Tần suất phát biểu của NPC */}
+        {/* Mật độ rải chat của NPC (thay cho chu kỳ phát biểu cố định) */}
         <div>
           <div className="flex justify-between text-xs mb-1">
-            <span className="text-amber-200/80">
-              Chu kỳ NPC phát biểu (trong lớp & hàng chờ):
+            <span
+              className="text-amber-200/80"
+              title="NPC trong lớp và NPC trong hàng chờ sẽ phát biểu rải rác ngẫu nhiên theo mật độ này (0% = Tắt rải chat)"
+            >
+              Mật độ rải chat NPC (trong lớp & hàng chờ):
             </span>
             <span className="font-bold text-amber-400">
-              Mỗi {(config.npcPrayIntervalSec ?? 6).toFixed(1)}s
+              {(config.npcScatterChatDensity ?? 50) <= 0
+                ? '0% (Tắt)'
+                : `${config.npcScatterChatDensity ?? 50}%`}
             </span>
           </div>
           <input
             type="range"
-            min={1}
-            max={30}
-            step={0.5}
-            value={config.npcPrayIntervalSec ?? 6}
+            min={0}
+            max={100}
+            step={5}
+            value={config.npcScatterChatDensity ?? 50}
             onChange={(e) =>
-              onUpdateConfig({ npcPrayIntervalSec: Number(e.target.value) })
+              onUpdateConfig({ npcScatterChatDensity: Number(e.target.value) })
             }
             className="w-full accent-amber-500"
           />
+          <p className="text-[10px] text-stone-400 mt-0.5 leading-snug">
+            Khi hỏi bài: NPC trả lời đúng sẽ chat đáp án như người thật; NPC sai sẽ im lặng hoặc chat đáp án bị đảo 2 chữ cái liền nhau.
+          </p>
         </div>
 
         {/* Số NPC mới thêm vào hàng chờ mỗi khi xong 1 câu hỏi (±1,2,3) & Tỷ lệ NPC trả lời đúng */}

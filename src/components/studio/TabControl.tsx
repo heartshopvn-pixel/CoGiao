@@ -1,5 +1,7 @@
 import React, { useState } from 'react';
 import {
+  ArrowDown,
+  ArrowUp,
   Bell,
   BellRing,
   BookOpen,
@@ -296,6 +298,7 @@ export const TabControl: React.FC<TabControlProps> = ({
   const [showBoardSizeSliders, setShowBoardSizeSliders] = useState(true);
   const [showTeacherFlowScript, setShowTeacherFlowScript] = useState(false);
   const [quizImportFeedback, setQuizImportFeedback] = useState<string | null>(null);
+  const [selectedGuideIdx, setSelectedGuideIdx] = useState<number>(0);
 
   const activeQuizList =
     Array.isArray(config.customQuizQuestions) && config.customQuizQuestions.length > 0
@@ -310,23 +313,24 @@ export const TabControl: React.FC<TabControlProps> = ({
   const selectedDeckId = config.activeQuizDeckId || quizDecks[0]?.id || 'deck-12a1';
   const selectedDeck = quizDecks.find((d) => d.id === selectedDeckId) || quizDecks[0];
 
-  // Gán sao may mắn ngẫu nhiên theo tỉ lệ 1/2/3 sao
+  // Gán sao may mắn ngẫu nhiên theo tỉ lệ % (Câu hỏi bình thường = 0 sao, 1 sao = x2đ, 2 sao = x3đ, 3 sao = x4đ)
   const assignLuckyStarsWithRatios = (items: EnglishQuizItem[]): EnglishQuizItem[] => {
-    const r1 = Math.max(0, config.luckyStarRatio1 ?? 70);
-    const r2 = Math.max(0, config.luckyStarRatio2 ?? 20);
-    const r3 = Math.max(0, config.luckyStarRatio3 ?? 10);
-    const total = r1 + r2 + r3 || 100;
+    const r1 = Math.max(0, Math.min(100, config.luckyStarRatio1 ?? 15));
+    const r2 = Math.max(0, Math.min(100, config.luckyStarRatio2 ?? 10));
+    const r3 = Math.max(0, Math.min(100, config.luckyStarRatio3 ?? 5));
 
     return items.map((item) => {
-      if (item.luckyStars) return item;
-      const rnd = Math.random() * total;
-      let stars: 1 | 2 | 3 = 1;
-      if (rnd < r1) {
-        stars = 1;
-      } else if (rnd < r1 + r2) {
-        stars = 2;
-      } else {
+      if (typeof item.luckyStars === 'number') return item;
+      const rnd = Math.random() * 100;
+      let stars: 0 | 1 | 2 | 3 = 0;
+      if (rnd < r3) {
         stars = 3;
+      } else if (rnd < r3 + r2) {
+        stars = 2;
+      } else if (rnd < r3 + r2 + r1) {
+        stars = 1;
+      } else {
+        stars = 0;
       }
       return { ...item, luckyStars: stars };
     });
@@ -372,21 +376,28 @@ export const TabControl: React.FC<TabControlProps> = ({
     onUpdateConfig({ customQuizQuestions: nextQueue });
   };
 
-  // Tùy chọn: Thêm sao trực tiếp vào câu hỏi ở đầu hàng chờ (hoặc câu hiện tại)
-  const handleSetHeadQuestionStars = (stars: 1 | 2 | 3) => {
+  // Tùy chọn: Thêm sao trực tiếp vào câu hỏi ở đầu hàng chờ (0 = câu hỏi thường, 1 = x2đ, 2 = x3đ, 3 = x4đ)
+  const handleSetHeadQuestionStars = (stars: 0 | 1 | 2 | 3) => {
     if (!activeQuizList.length) return;
     const nextList = [...activeQuizList];
     const targetIdx = 0; // Đầu hàng chờ
     nextList[targetIdx] = { ...nextList[targetIdx], luckyStars: stars };
     onUpdateConfig({ customQuizQuestions: nextList });
-    setQuizImportFeedback(`⭐ Đã gán ${stars} Sao May Mắn (x${stars}đ) cho câu đầu hàng chờ!`);
+    if (stars === 0) {
+      setQuizImportFeedback('✅ Đã đặt câu đầu hàng chờ về câu hỏi thường (không sao, x1 điểm)!');
+    } else {
+      setQuizImportFeedback(
+        `⭐ Đã gán ${stars} sao may mắn (x${stars + 1} điểm) cho câu đầu hàng chờ!`
+      );
+    }
   };
 
-  // Thay đổi sao cho từng câu hỏi trực tiếp trong list (click chu kỳ 1 -> 2 -> 3 -> 1)
+  // Thay đổi sao cho từng câu hỏi trực tiếp trong list (click chu kỳ 0 -> 1 -> 2 -> 3 -> 0)
   const handleCycleQuestionStars = (idx: number) => {
     const nextList = [...activeQuizList];
-    const currentStars = nextList[idx]?.luckyStars || 1;
-    const nextStars: 1 | 2 | 3 = currentStars === 1 ? 2 : currentStars === 2 ? 3 : 1;
+    const currentStars = nextList[idx]?.luckyStars || 0;
+    const nextStars: 0 | 1 | 2 | 3 =
+      currentStars === 0 ? 1 : currentStars === 1 ? 2 : currentStars === 2 ? 3 : 0;
     nextList[idx] = { ...nextList[idx], luckyStars: nextStars };
     onUpdateConfig({ customQuizQuestions: nextList });
   };
@@ -844,7 +855,7 @@ export const TabControl: React.FC<TabControlProps> = ({
               <div className="h-44 overflow-y-auto space-y-1 pr-1 border border-stone-900 rounded-lg p-1 bg-stone-900/40">
                 {activeQuizList.slice(0, config.quizQueueLimitDisplay ?? 10).map((q, idx) => {
                   const isCurrent = idx === (classBoardState?.questionIndex ?? 0);
-                  const stars = q.luckyStars || 1;
+                  const stars = q.luckyStars || 0;
                   return (
                     <div
                       key={q.id || idx}
@@ -873,21 +884,33 @@ export const TabControl: React.FC<TabControlProps> = ({
                       </div>
 
                       <div className="flex items-center gap-1 shrink-0">
-                        {/* Nút bấm đổi sao may mắn (cycle 1 -> 2 -> 3) */}
+                        {/* Nút bấm đổi sao may mắn (cycle 0 -> 1 -> 2 -> 3 -> 0) */}
                         <button
                           type="button"
                           onClick={() => handleCycleQuestionStars(idx)}
-                          title={`Đang có ${stars} Sao May Mắn (x${stars} điểm). Bấm để đổi 1 -> 2 -> 3 sao`}
+                          title={
+                            stars > 0
+                              ? `${stars} sao may mắn, x${stars + 1} điểm. Bấm để đổi`
+                              : 'Câu hỏi thường (không sao, x1 điểm). Bấm để thêm sao'
+                          }
                           className={`px-1.5 py-0.5 rounded font-mono font-bold text-[9px] flex items-center gap-0.5 border cursor-pointer ${
                             stars === 3
                               ? 'bg-amber-500/30 border-yellow-300 text-yellow-200'
                               : stars === 2
                               ? 'bg-amber-500/20 border-amber-400 text-amber-300'
+                              : stars === 1
+                              ? 'bg-emerald-500/20 border-emerald-400 text-emerald-200'
                               : 'bg-stone-800 border-stone-700 text-stone-400'
                           }`}
                         >
-                          <span>{stars === 3 ? '⭐⭐⭐' : stars === 2 ? '⭐⭐' : '⭐'}</span>
-                          <span>x{stars}</span>
+                          {stars > 0 ? (
+                            <>
+                              <span>{'⭐'.repeat(stars)}</span>
+                              <span>x{stars + 1}</span>
+                            </>
+                          ) : (
+                            <span>Thường</span>
+                          )}
                         </button>
 
                         <button
@@ -975,20 +998,20 @@ export const TabControl: React.FC<TabControlProps> = ({
                 </div>
               </div>
 
-              {/* Hàng 4: 3 Tùy chọn Tỉ lệ câu hỏi có Sao May Mắn (1/2/3 tương đương x1 x2 x3 điểm) - Ô VUÔNG NHẬP SỐ */}
+              {/* Hàng 4: 3 Tùy chọn Tỉ lệ câu hỏi có Sao May Mắn (1★=x2đ, 2★=x3đ, 3★=x4đ; phần còn lại là câu thường không sao) */}
               <div className="pt-1.5 border-t border-stone-800 space-y-1">
                 <div className="flex items-center justify-between text-stone-300 text-[10px] font-semibold">
-                  <span>Tỉ lệ Sao May Mắn (Hệ số điểm):</span>
-                  <span className="text-amber-300 font-mono text-[9.5px]">Ô vuông % (không cần thanh kéo)</span>
+                  <span>Tỉ lệ Sao May Mắn (Câu thường không sao):</span>
+                  <span className="text-amber-300 font-mono text-[9.5px]">Ô vuông %</span>
                 </div>
                 <div className="grid grid-cols-3 gap-1.5">
                   <div className="p-1 rounded bg-stone-900 border border-stone-800 flex items-center justify-between gap-1">
-                    <span className="text-[9.5px] text-stone-300">⭐ 1★ (x1đ):</span>
+                    <span className="text-[9.5px] text-emerald-200">⭐ 1★ (x2đ):</span>
                     <input
                       type="number"
                       min={0}
                       max={100}
-                      value={config.luckyStarRatio1 ?? 70}
+                      value={config.luckyStarRatio1 ?? 15}
                       onChange={(e) => onUpdateConfig({ luckyStarRatio1: Math.max(0, parseInt(e.target.value, 10) || 0) })}
                       className="w-10 px-1 py-0.5 rounded bg-stone-950 border border-stone-700 text-center font-mono font-bold text-[10px] text-emerald-300 focus:outline-none focus:border-cyan-400"
                     />
@@ -996,12 +1019,12 @@ export const TabControl: React.FC<TabControlProps> = ({
                   </div>
 
                   <div className="p-1 rounded bg-stone-900 border border-stone-800 flex items-center justify-between gap-1">
-                    <span className="text-[9.5px] text-amber-200">⭐⭐ 2★ (x2đ):</span>
+                    <span className="text-[9.5px] text-amber-200">⭐⭐ 2★ (x3đ):</span>
                     <input
                       type="number"
                       min={0}
                       max={100}
-                      value={config.luckyStarRatio2 ?? 20}
+                      value={config.luckyStarRatio2 ?? 10}
                       onChange={(e) => onUpdateConfig({ luckyStarRatio2: Math.max(0, parseInt(e.target.value, 10) || 0) })}
                       className="w-10 px-1 py-0.5 rounded bg-stone-950 border border-stone-700 text-center font-mono font-bold text-[10px] text-amber-300 focus:outline-none focus:border-cyan-400"
                     />
@@ -1009,12 +1032,12 @@ export const TabControl: React.FC<TabControlProps> = ({
                   </div>
 
                   <div className="p-1 rounded bg-stone-900 border border-stone-800 flex items-center justify-between gap-1">
-                    <span className="text-[9.5px] text-yellow-300">⭐⭐⭐ 3★ (x3đ):</span>
+                    <span className="text-[9.5px] text-yellow-300">⭐⭐⭐ 3★ (x4đ):</span>
                     <input
                       type="number"
                       min={0}
                       max={100}
-                      value={config.luckyStarRatio3 ?? 10}
+                      value={config.luckyStarRatio3 ?? 5}
                       onChange={(e) => onUpdateConfig({ luckyStarRatio3: Math.max(0, parseInt(e.target.value, 10) || 0) })}
                       className="w-10 px-1 py-0.5 rounded bg-stone-950 border border-stone-700 text-center font-mono font-bold text-[10px] text-yellow-300 focus:outline-none focus:border-cyan-400"
                     />
@@ -1026,29 +1049,36 @@ export const TabControl: React.FC<TabControlProps> = ({
               {/* Hàng 5: Tùy chọn Thêm sao trực tiếp vào câu hỏi ở đầu hàng chờ */}
               <div className="pt-1 border-t border-stone-800 flex items-center justify-between gap-1 flex-wrap">
                 <span className="text-[10px] font-semibold text-stone-300">
-                  Gán sao câu đầu hàng chờ:
+                  Gán sao câu đầu:
                 </span>
                 <div className="flex items-center gap-1">
                   <button
                     type="button"
-                    onClick={() => handleSetHeadQuestionStars(1)}
-                    className="px-2 py-0.5 rounded bg-stone-800 hover:bg-stone-700 border border-stone-700 text-[9.5px] font-bold text-stone-200 cursor-pointer"
+                    onClick={() => handleSetHeadQuestionStars(0)}
+                    className="px-1.5 py-0.5 rounded bg-stone-800 hover:bg-stone-700 border border-stone-700 text-[9.5px] font-bold text-stone-300 cursor-pointer"
                   >
-                    ⭐ 1★ (x1)
+                    Thường
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => handleSetHeadQuestionStars(1)}
+                    className="px-1.5 py-0.5 rounded bg-emerald-950/80 hover:bg-emerald-900 border border-emerald-500/50 text-[9.5px] font-bold text-emerald-200 cursor-pointer"
+                  >
+                    ⭐ 1★ (x2)
                   </button>
                   <button
                     type="button"
                     onClick={() => handleSetHeadQuestionStars(2)}
-                    className="px-2 py-0.5 rounded bg-amber-950/80 hover:bg-amber-900 border border-amber-500/50 text-[9.5px] font-bold text-amber-200 cursor-pointer"
+                    className="px-1.5 py-0.5 rounded bg-amber-950/80 hover:bg-amber-900 border border-amber-500/50 text-[9.5px] font-bold text-amber-200 cursor-pointer"
                   >
-                    ⭐⭐ 2★ (x2)
+                    ⭐⭐ 2★ (x3)
                   </button>
                   <button
                     type="button"
                     onClick={() => handleSetHeadQuestionStars(3)}
-                    className="px-2 py-0.5 rounded bg-gradient-to-r from-amber-500 to-rose-500 text-slate-950 font-black text-[9.5px] cursor-pointer shadow-sm"
+                    className="px-1.5 py-0.5 rounded bg-gradient-to-r from-amber-500 to-rose-500 text-slate-950 font-black text-[9.5px] cursor-pointer shadow-sm"
                   >
-                    ⭐⭐⭐ 3★ (x3)
+                    ⭐⭐⭐ 3★ (x4)
                   </button>
                 </div>
               </div>
@@ -1622,7 +1652,7 @@ export const TabControl: React.FC<TabControlProps> = ({
               type="button"
               onClick={() =>
                 onTriggerClassroomGift?.(
-                  'Cat',
+                  'Đỉnh',
                   1,
                   giftTestTargetMode === 'in_class' ? '' : customName,
                   customAvatarUrl,
@@ -1631,8 +1661,9 @@ export const TabControl: React.FC<TabControlProps> = ({
                 )
               }
               className="py-1.5 px-2 rounded-lg bg-amber-950/75 hover:bg-amber-900/80 border border-amber-500/45 text-[11px] font-bold text-amber-200 flex items-center justify-between gap-1 transition cursor-pointer"
+              title="Quà Đỉnh (con mèo đưa tay lên like 1 coin) -> Nuôi mèo"
             >
-              <span className="truncate">🐱 (1) Con mèo: Nuôi mèo</span>
+              <span className="truncate">🐱 (1) Đỉnh: Nuôi mèo</span>
               <span className="text-[9.5px] font-mono text-emerald-300 shrink-0">+10đ</span>
             </button>
 
@@ -1676,7 +1707,7 @@ export const TabControl: React.FC<TabControlProps> = ({
               type="button"
               onClick={() =>
                 onTriggerClassroomGift?.(
-                  'Pig',
+                  'Chú heo may mắn',
                   10,
                   giftTestTargetMode === 'in_class' ? '' : customName,
                   customAvatarUrl,
@@ -1685,8 +1716,9 @@ export const TabControl: React.FC<TabControlProps> = ({
                 )
               }
               className="py-1.5 px-2 rounded-lg bg-rose-950/80 hover:bg-rose-900/85 border border-rose-500/50 text-[11px] font-bold text-rose-200 flex items-center justify-between gap-1 transition cursor-pointer"
+              title="Quà Chú heo may mắn (10 coin) -> Thêm 1 heo lên bàn (max 1) & Thả 8 heo tấn công"
             >
-              <span className="truncate">🐷 (10) Heo: Thả 5 heo hù</span>
+              <span className="truncate">🐷 (10) Chú heo may mắn: 8 heo</span>
               <span className="text-[9.5px] font-mono text-emerald-300 shrink-0">+40đ</span>
             </button>
 
@@ -2089,42 +2121,6 @@ export const TabControl: React.FC<TabControlProps> = ({
         />
       </section>
 
-      {/* 4.5. BẢNG HOA ĐIỂM 10 — CHẠY BẢNG THEO CHU KỲ */}
-      <section className="p-3 rounded-xl bg-stone-900/75 border border-pink-500/35 space-y-2">
-        <div className="flex items-center justify-between gap-2">
-          <div className="flex items-center gap-1.5">
-            <Flower10BadgeIcon className="w-3.5 h-3.5" />
-            <h2 className="text-xs font-bold text-pink-200">
-              Bảng Hoa Điểm 10 (Chu Kỳ Chạy Bảng)
-            </h2>
-          </div>
-          <button
-            type="button"
-            onClick={() =>
-              onUpdateHudLayout({
-                showLotusLeaderboardBox:
-                  hud.showLotusLeaderboardBox === false ? true : false,
-              })
-            }
-            className={`px-2 py-0.5 rounded text-[10px] font-bold border cursor-pointer transition ${
-              hud.showLotusLeaderboardBox !== false
-                ? 'bg-emerald-500/20 border-emerald-400 text-emerald-200'
-                : 'bg-stone-900 border-stone-700 text-stone-400'
-            }`}
-          >
-            {hud.showLotusLeaderboardBox !== false ? 'Đang Hiện' : 'Đang Ẩn'}
-          </button>
-        </div>
-
-        <HudCycleSettingsCard
-          title="Bảng Hoa Điểm 10"
-          cycle={hud.lotusLeaderboardCycle}
-          onChange={(nextCycle) =>
-            onUpdateHudLayout({ lotusLeaderboardCycle: nextCycle })
-          }
-        />
-      </section>
-
       {/* 4.8. BẢNG NOTE 1 ("Đây là trò chơi 2D.") */}
       <section className="p-3 rounded-xl bg-stone-900/75 border border-yellow-500/35 space-y-2">
         <div className="flex items-center justify-between gap-2">
@@ -2179,13 +2175,36 @@ export const TabControl: React.FC<TabControlProps> = ({
         />
       </section>
 
-      {/* 5. BẢNG HƯỚNG DẪN (Kèm hiển thị Icon Quà Tặng trực quan & Chạy bảng theo chu kỳ) */}
+      {/* 5. BẢNG HƯỚNG DẪN (Chỉnh vị trí dòng ↑/↓ cạnh nút thêm dòng, cỡ chữ, 10 màu chữ đồng bộ viền & chạy bảng theo chu kỳ) */}
       <section className="p-3 rounded-xl bg-stone-900/75 border border-emerald-500/35 space-y-2.5">
-        <div className="flex items-center justify-between gap-2">
+        <div className="flex items-center justify-between gap-2 flex-wrap">
           <h2 className="text-xs font-bold text-emerald-200">
             Bảng Hướng Dẫn ({(hud.guideItems ?? DEFAULT_GUIDE_ITEMS).length} dòng)
           </h2>
-          <div className="flex items-center gap-1 shrink-0">
+
+          <div className="flex items-center gap-1 flex-wrap">
+            {/* Mục tăng/giảm size chữ của Bảng Hướng Dẫn */}
+            <div className="flex items-center gap-1 px-1.5 py-0.5 rounded bg-stone-950 border border-stone-800 mr-1">
+              <span className="text-[10px] text-stone-400">Cỡ chữ:</span>
+              <input
+                type="range"
+                min={6.5}
+                max={18}
+                step={0.5}
+                value={hud.guideFontSize || 8.5}
+                onChange={(e) =>
+                  onUpdateHudLayout({
+                    guideFontSize: parseFloat(e.target.value),
+                  })
+                }
+                className="w-16 accent-emerald-400 h-1.5 bg-stone-800 rounded-lg cursor-pointer"
+              />
+              <span className="text-[10.5px] font-mono font-bold text-emerald-300 w-9 text-right">
+                {hud.guideFontSize || 8.5}px
+              </span>
+            </div>
+
+            {/* Nút Thêm dòng + Nút Mũi tên Lên (↑) và Mũi tên Xuống (↓) cạnh nút Thêm dòng */}
             <button
               type="button"
               onClick={() => {
@@ -2197,18 +2216,66 @@ export const TabControl: React.FC<TabControlProps> = ({
                   modelType: 'rose',
                   colorTheme: 'amber',
                 };
-                onUpdateHudLayout({ guideItems: [...currentList, nextItem] });
+                const nextList = [...currentList, nextItem];
+                onUpdateHudLayout({ guideItems: nextList });
+                setSelectedGuideIdx(nextList.length - 1);
               }}
               className="px-2 py-1 rounded bg-emerald-500 hover:bg-emerald-400 text-stone-950 text-[10px] font-extrabold flex items-center gap-1 cursor-pointer transition"
             >
               <Plus className="w-3 h-3" />
               <span>Thêm dòng</span>
             </button>
+
             <button
               type="button"
-              onClick={() =>
-                onUpdateHudLayout({ guideItems: DEFAULT_GUIDE_ITEMS })
-              }
+              onClick={() => {
+                const currentList = [...(hud.guideItems ?? DEFAULT_GUIDE_ITEMS)];
+                const safeIdx = Math.min(
+                  Math.max(0, selectedGuideIdx),
+                  currentList.length - 1
+                );
+                if (safeIdx <= 0) return;
+                [currentList[safeIdx - 1], currentList[safeIdx]] = [
+                  currentList[safeIdx],
+                  currentList[safeIdx - 1],
+                ];
+                onUpdateHudLayout({ guideItems: currentList });
+                setSelectedGuideIdx(safeIdx - 1);
+              }}
+              title="Đẩy dòng đang chọn lên trên"
+              className="p-1 rounded bg-stone-800 hover:bg-stone-700 border border-stone-700 text-amber-300 cursor-pointer transition"
+            >
+              <ArrowUp className="w-3 h-3" />
+            </button>
+
+            <button
+              type="button"
+              onClick={() => {
+                const currentList = [...(hud.guideItems ?? DEFAULT_GUIDE_ITEMS)];
+                const safeIdx = Math.min(
+                  Math.max(0, selectedGuideIdx),
+                  currentList.length - 1
+                );
+                if (safeIdx < 0 || safeIdx >= currentList.length - 1) return;
+                [currentList[safeIdx], currentList[safeIdx + 1]] = [
+                  currentList[safeIdx + 1],
+                  currentList[safeIdx],
+                ];
+                onUpdateHudLayout({ guideItems: currentList });
+                setSelectedGuideIdx(safeIdx + 1);
+              }}
+              title="Đẩy dòng đang chọn xuống dưới"
+              className="p-1 rounded bg-stone-800 hover:bg-stone-700 border border-stone-700 text-amber-300 cursor-pointer transition"
+            >
+              <ArrowDown className="w-3 h-3" />
+            </button>
+
+            <button
+              type="button"
+              onClick={() => {
+                onUpdateHudLayout({ guideItems: DEFAULT_GUIDE_ITEMS });
+                setSelectedGuideIdx(0);
+              }}
               title="Khôi phục mặc định"
               className="px-1.5 py-1 rounded bg-stone-800 hover:bg-stone-700 border border-stone-700 text-stone-300 text-[10px] font-semibold flex items-center gap-1 cursor-pointer transition"
             >
@@ -2217,18 +2284,30 @@ export const TabControl: React.FC<TabControlProps> = ({
           </div>
         </div>
 
-        <div className="space-y-1.5 max-h-56 overflow-y-auto pr-0.5">
+        <div className="space-y-1.5 max-h-60 overflow-y-auto pr-0.5">
           {(hud.guideItems ?? DEFAULT_GUIDE_ITEMS).map((item, idx) => {
             const currentList = hud.guideItems ?? DEFAULT_GUIDE_ITEMS;
+            const isRowSelected = selectedGuideIdx === idx;
             const updateItem = (patch: Partial<GuideTaskItem>) => {
               const next = currentList.map((it, i) =>
                 i === idx ? { ...it, ...patch } : it
               );
               onUpdateHudLayout({ guideItems: next });
             };
+            const moveRow = (dir: -1 | 1) => {
+              const targetIdx = idx + dir;
+              if (targetIdx < 0 || targetIdx >= currentList.length) return;
+              const next = [...currentList];
+              [next[idx], next[targetIdx]] = [next[targetIdx], next[idx]];
+              onUpdateHudLayout({ guideItems: next });
+              setSelectedGuideIdx(targetIdx);
+            };
             const removeItem = () => {
               const next = currentList.filter((_, i) => i !== idx);
               onUpdateHudLayout({ guideItems: next });
+              if (selectedGuideIdx >= next.length) {
+                setSelectedGuideIdx(Math.max(0, next.length - 1));
+              }
             };
             const hasIcon =
               Boolean(item.modelType) && item.modelType !== 'none';
@@ -2236,8 +2315,41 @@ export const TabControl: React.FC<TabControlProps> = ({
             return (
               <div
                 key={item.id || idx}
-                className="p-1.5 rounded-lg bg-stone-950 border border-stone-800 flex items-center gap-1.5"
+                onClick={() => setSelectedGuideIdx(idx)}
+                className={`p-1.5 rounded-lg bg-stone-950 border flex items-center gap-1 transition cursor-pointer ${
+                  isRowSelected
+                    ? 'border-emerald-400/80 ring-1 ring-emerald-400/30'
+                    : 'border-stone-800 hover:border-stone-700'
+                }`}
               >
+                {/* Nút Lên / Xuống trên từng dòng */}
+                <div className="flex flex-col gap-0.5 shrink-0">
+                  <button
+                    type="button"
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      moveRow(-1);
+                    }}
+                    disabled={idx === 0}
+                    title="Di chuyển dòng lên"
+                    className="p-0.5 rounded bg-stone-900 hover:bg-stone-800 disabled:opacity-30 text-stone-300 cursor-pointer"
+                  >
+                    <ArrowUp className="w-2.5 h-2.5" />
+                  </button>
+                  <button
+                    type="button"
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      moveRow(1);
+                    }}
+                    disabled={idx === currentList.length - 1}
+                    title="Di chuyển dòng xuống"
+                    className="p-0.5 rounded bg-stone-900 hover:bg-stone-800 disabled:opacity-30 text-stone-300 cursor-pointer"
+                  >
+                    <ArrowDown className="w-2.5 h-2.5" />
+                  </button>
+                </div>
+
                 {/* Ô hiển thị trực quan Icon tượng trưng cho quà tặng */}
                 <div
                   title={
@@ -2268,20 +2380,43 @@ export const TabControl: React.FC<TabControlProps> = ({
                       modelType: e.target.value as GuideTaskItem['modelType'],
                     })
                   }
-                  className="px-1.5 py-1 rounded bg-stone-900 border border-stone-700 text-[10px] text-amber-300 shrink-0 focus:outline-none"
+                  className="px-1 py-1 rounded bg-stone-900 border border-stone-700 text-[10px] text-amber-300 shrink-0 focus:outline-none"
                 >
                   <option value="none">Không icon</option>
-                  <option value="rose">🌹 Hoa hồng (Tặng cô)</option>
-                  <option value="icecream">🍦 Kem (Tặng thầy)</option>
-                  <option value="cat">🐱 Con mèo (Nuôi mèo)</option>
-                  <option value="gg">🍿 GG (Ăn vụn)</option>
-                  <option value="heart">🖥️ Bắn tim (Bàn PC)</option>
-                  <option value="pig">🐷 Heo (Thả heo)</option>
-                  <option value="vip">💵 VIP (Rich Kid)</option>
+                  <option value="rose">🌹 Hoa hồng</option>
+                  <option value="icecream">🍦 Kem</option>
+                  <option value="cat">🐱 Con mèo</option>
+                  <option value="gg">🍿 GG</option>
+                  <option value="heart">🖥️ Bắn tim</option>
+                  <option value="pig">🐷 Heo</option>
+                  <option value="vip">💵 VIP</option>
                   <option value="lotus">🪷 Trà sữa</option>
                   <option value="tray">🎁 Hộp quà</option>
                   <option value="special_tray">🏆 Cúp vàng</option>
                   <option value="incense">📒 Vở điểm 10</option>
+                </select>
+
+                {/* Thẻ chọn 10 màu chữ nổi bật trên nền tối (đồng bộ màu viền thẻ chứa chữ) */}
+                <select
+                  value={item.colorTheme || 'amber'}
+                  onChange={(e) =>
+                    updateItem({
+                      colorTheme: e.target.value as GuideTaskItem['colorTheme'],
+                    })
+                  }
+                  title="Chọn màu chữ & màu viền đồng bộ (10 màu nổi bật)"
+                  className="px-1 py-1 rounded bg-stone-900 border border-stone-700 text-[10px] font-bold text-stone-100 shrink-0 focus:outline-none"
+                >
+                  <option value="yellow">🟡 Vàng sáng</option>
+                  <option value="amber">🟠 Vàng cam</option>
+                  <option value="orange">🟧 Cam rực</option>
+                  <option value="rose">🌹 Đỏ hồng</option>
+                  <option value="pink">🌸 Hồng phấn</option>
+                  <option value="fuchsia">💖 Hồng tím</option>
+                  <option value="violet">💜 Tím sáng</option>
+                  <option value="cyan">🩵 Xanh ngọc</option>
+                  <option value="emerald">💚 Xanh lục</option>
+                  <option value="lime">🍏 Xanh chanh</option>
                 </select>
 
                 <input
@@ -2289,7 +2424,7 @@ export const TabControl: React.FC<TabControlProps> = ({
                   value={item.label}
                   onChange={(e) => updateItem({ label: e.target.value })}
                   placeholder="Tên mục..."
-                  className="w-24 px-1.5 py-1 rounded bg-stone-900 border border-stone-800 text-[11px] font-bold text-amber-200 focus:outline-none focus:border-amber-500 shrink-0"
+                  className="w-20 px-1.5 py-1 rounded bg-stone-900 border border-stone-800 text-[11px] font-bold text-amber-200 focus:outline-none focus:border-amber-500 shrink-0"
                 />
 
                 <input
@@ -2302,7 +2437,10 @@ export const TabControl: React.FC<TabControlProps> = ({
 
                 <button
                   type="button"
-                  onClick={removeItem}
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    removeItem();
+                  }}
                   className="p-1 rounded bg-rose-950/60 hover:bg-rose-900 text-rose-300 border border-rose-500/30 cursor-pointer shrink-0 transition"
                 >
                   <Trash2 className="w-3 h-3" />
@@ -2318,65 +2456,6 @@ export const TabControl: React.FC<TabControlProps> = ({
           cycle={hud.guideCycle}
           onChange={(nextCycle) => onUpdateHudLayout({ guideCycle: nextCycle })}
         />
-      </section>
-
-      {/* 6. THỜI GIAN NGỒI BÀN ĐÔI */}
-      <section className="p-3 rounded-xl bg-stone-900/75 border border-stone-800 space-y-2.5">
-        <div className="grid grid-cols-2 gap-2">
-          <div className="p-2 rounded-lg bg-stone-950/90 border border-amber-500/30 space-y-1.5">
-            <div className="flex items-center justify-between gap-1">
-              <span className="text-[11px] font-bold text-amber-300">
-                👑 Ngồi Ghế VIP
-              </span>
-              <span className="text-[11px] font-mono font-bold text-amber-300">
-                {config.vipPrayDurationSec ?? config.prayDurationSec ?? 35}s
-              </span>
-            </div>
-            <input
-              type="range"
-              min={3}
-              max={180}
-              step={1}
-              value={Math.min(
-                180,
-                Math.max(3, config.vipPrayDurationSec ?? config.prayDurationSec ?? 35)
-              )}
-              onChange={(e) =>
-                onUpdateConfig({
-                  vipPrayDurationSec: Math.max(3, parseInt(e.target.value, 10) || 3),
-                })
-              }
-              className="w-full accent-amber-400 h-1.5 bg-stone-800 rounded-lg cursor-pointer"
-            />
-          </div>
-
-          <div className="p-2 rounded-lg bg-stone-950/90 border border-stone-800 space-y-1.5">
-            <div className="flex items-center justify-between gap-1">
-              <span className="text-[11px] font-bold text-emerald-300">
-                🧘 Ngồi Ghế Thường
-              </span>
-              <span className="text-[11px] font-mono font-bold text-emerald-300">
-                {config.normalPrayDurationSec ?? config.prayDurationSec ?? 22}s
-              </span>
-            </div>
-            <input
-              type="range"
-              min={3}
-              max={180}
-              step={1}
-              value={Math.min(
-                180,
-                Math.max(3, config.normalPrayDurationSec ?? config.prayDurationSec ?? 22)
-              )}
-              onChange={(e) =>
-                onUpdateConfig({
-                  normalPrayDurationSec: Math.max(3, parseInt(e.target.value, 10) || 3),
-                })
-              }
-              className="w-full accent-emerald-400 h-1.5 bg-stone-800 rounded-lg cursor-pointer"
-            />
-          </div>
-        </div>
       </section>
     </div>
   );

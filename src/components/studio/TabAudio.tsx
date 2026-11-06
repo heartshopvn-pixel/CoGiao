@@ -22,9 +22,14 @@ import {
   ClassroomGiftEventId,
   DharmaArticleItem,
   GameConfig,
+  LessonFlow5ConditionKey,
+  LessonFlow6ConditionKey,
   TTSEngineType,
 } from '../../types/game';
-import { CLASSROOM_GIFT_EVENTS_META } from '../../config/constants';
+import {
+  CLASSROOM_GIFT_EVENTS_META,
+  DEFAULT_CONFIG,
+} from '../../config/constants';
 import { soundEngine } from '../../services/soundEngine';
 
 interface TabAudioProps {
@@ -66,6 +71,10 @@ export const TabAudio: React.FC<TabAudioProps> = ({
   onNextDharmaArticle,
 }) => {
   const [systemVoices, setSystemVoices] = useState<SpeechSynthesisVoice[]>([]);
+  const [activeFlow5Cond, setActiveFlow5Cond] =
+    useState<LessonFlow5ConditionKey>('normal');
+  const [activeFlow6Cond, setActiveFlow6Cond] =
+    useState<LessonFlow6ConditionKey>('normal');
 
   const scanVoices = () => {
     if (!('speechSynthesis' in window)) return;
@@ -964,7 +973,7 @@ export const TabAudio: React.FC<TabAudioProps> = ({
         </label>
       </section>
 
-      {/* 2B. ÂM THANH 7 MÓN QUÀ SỰ KIỆN LỚP HỌC (NGHE THỬ & CHÈN FILE MP3) */}
+      {/* 2B. ÂM THANH 7 MÓN QUÀ SỰ KIỆN LỚP HỌC (NGHE THỬ, CHỈNH ÂM LƯỢNG & CHÈN FILE MP3) */}
       <section className="p-3 rounded-xl bg-stone-900/90 border border-pink-500/40 space-y-2.5 shadow-md">
         <div className="flex items-center justify-between gap-2 border-b border-stone-800 pb-2">
           <div className="flex items-center gap-1.5 min-w-0">
@@ -987,119 +996,185 @@ export const TabAudio: React.FC<TabAudioProps> = ({
           </label>
         </div>
 
+        {/* Thanh điều chỉnh Âm Lượng Chung cho toàn bộ sự kiện tặng quà */}
+        <div className="p-2 rounded-lg bg-stone-950/85 border border-pink-500/30 flex items-center justify-between gap-3">
+          <div className="flex items-center gap-1.5 min-w-0">
+            <Volume2 className="w-3.5 h-3.5 text-pink-400 shrink-0" />
+            <span className="text-[11px] font-bold text-pink-200 truncate">
+              Âm lượng chung sự kiện tặng quà:
+            </span>
+          </div>
+          <div className="flex items-center gap-2 shrink-0">
+            <input
+              type="range"
+              min={0}
+              max={1}
+              step={0.05}
+              value={config.giftSoundVolume ?? 1.0}
+              onChange={(e) =>
+                onUpdateConfig({
+                  giftSoundVolume: Math.max(
+                    0,
+                    Math.min(1, parseFloat(e.target.value))
+                  ),
+                })
+              }
+              className="w-28 accent-pink-500 h-1.5 bg-stone-800 rounded-lg cursor-pointer"
+            />
+            <span className="w-10 text-right text-[11px] font-mono font-bold text-pink-300 tabular-nums">
+              {Math.round((config.giftSoundVolume ?? 1.0) * 100)}%
+            </span>
+          </div>
+        </div>
+
         <div className="space-y-1.5">
           {CLASSROOM_GIFT_EVENTS_META.map((giftMeta) => {
             const giftId: ClassroomGiftEventId = giftMeta.id;
             const customUrl = config.giftSoundMp3Urls?.[giftId] || null;
             const customTitle =
               config.giftSoundMp3Titles?.[giftId] || 'Sound mặc định';
+            const itemVol = config.giftSoundVolumes?.[giftId] ?? 1.0;
 
             return (
               <div
                 key={giftId}
-                className="p-2 rounded-lg bg-stone-950/90 border border-stone-800 flex items-center justify-between gap-2"
+                className="p-2 rounded-lg bg-stone-950/90 border border-stone-800 space-y-1.5"
               >
-                <div className="min-w-0 flex-1">
-                  <div className="flex items-center gap-1.5">
-                    <span className="text-xs font-bold text-amber-200 truncate">
-                      {giftMeta.giftLabel}: {giftMeta.actionTitle}
-                    </span>
-                    <span className="px-1.5 py-0.2 rounded bg-emerald-500/20 border border-emerald-400/40 text-[9.5px] font-mono font-bold text-emerald-300 shrink-0">
-                      +{giftMeta.bonusPoints}đ
-                    </span>
+                <div className="flex items-center justify-between gap-2">
+                  <div className="min-w-0 flex-1">
+                    <div className="flex items-center gap-1.5">
+                      <span className="text-xs font-bold text-amber-200 truncate">
+                        {giftMeta.giftLabel}: {giftMeta.actionTitle}
+                      </span>
+                      <span className="px-1.5 py-0.2 rounded bg-emerald-500/20 border border-emerald-400/40 text-[9.5px] font-mono font-bold text-emerald-300 shrink-0">
+                        +{giftMeta.bonusPoints}đ
+                      </span>
+                    </div>
+                    <div className="text-[10px] text-stone-400 truncate">
+                      Audio:{' '}
+                      <span
+                        className={
+                          customUrl
+                            ? 'text-pink-300 font-semibold'
+                            : 'text-stone-400'
+                        }
+                      >
+                        {customUrl ? `MP3: ${customTitle}` : 'Mặc định (Synth hợp lý)'}
+                      </span>
+                    </div>
                   </div>
-                  <div className="text-[10px] text-stone-400 truncate">
-                    Audio:{' '}
-                    <span
-                      className={
-                        customUrl
-                          ? 'text-pink-300 font-semibold'
-                          : 'text-stone-400'
+
+                  <div className="flex items-center gap-1.5 shrink-0">
+                    <button
+                      type="button"
+                      onClick={() =>
+                        soundEngine.playGiftEventSound(giftId, config, true)
                       }
+                      className="px-2 py-1 rounded bg-pink-600/30 hover:bg-pink-500/45 border border-pink-400/50 text-[10px] font-bold text-pink-200 cursor-pointer transition"
                     >
-                      {customUrl ? `MP3: ${customTitle}` : 'Mặc định (Synth hợp lý)'}
-                    </span>
+                      Nghe thử
+                    </button>
+
+                    <label className="px-2 py-1 rounded bg-stone-800 hover:bg-stone-700 border border-stone-700 text-[10px] font-semibold text-amber-300 flex items-center gap-1 cursor-pointer transition">
+                      <Upload className="w-3 h-3" />
+                      <span>MP3</span>
+                      <input
+                        type="file"
+                        accept="audio/*"
+                        className="hidden"
+                        onChange={(e) => {
+                          const f = e.target.files?.[0];
+                          if (f) {
+                            const reader = new FileReader();
+                            reader.onload = () => {
+                              if (typeof reader.result === 'string') {
+                                const nextUrls = {
+                                  ...(config.giftSoundMp3Urls || {}),
+                                  [giftId]: reader.result,
+                                };
+                                const nextTitles = {
+                                  ...(config.giftSoundMp3Titles || {}),
+                                  [giftId]: f.name,
+                                };
+                                const nextConfig: GameConfig = {
+                                  ...config,
+                                  giftSoundEnabled: true,
+                                  giftSoundMp3Urls: nextUrls,
+                                  giftSoundMp3Titles: nextTitles,
+                                };
+                                onUpdateConfig({
+                                  giftSoundEnabled: true,
+                                  giftSoundMp3Urls: nextUrls,
+                                  giftSoundMp3Titles: nextTitles,
+                                });
+                                soundEngine.playGiftEventSound(
+                                  giftId,
+                                  nextConfig,
+                                  true
+                                );
+                              }
+                            };
+                            reader.readAsDataURL(f);
+                          }
+                          e.target.value = '';
+                        }}
+                      />
+                    </label>
+
+                    {customUrl && (
+                      <button
+                        type="button"
+                        title="Khôi phục sound mặc định"
+                        onClick={() => {
+                          const nextUrls = { ...(config.giftSoundMp3Urls || {}) };
+                          const nextTitles = {
+                            ...(config.giftSoundMp3Titles || {}),
+                          };
+                          delete nextUrls[giftId];
+                          delete nextTitles[giftId];
+                          onUpdateConfig({
+                            giftSoundMp3Urls: nextUrls,
+                            giftSoundMp3Titles: nextTitles,
+                          });
+                        }}
+                        className="p-1 rounded bg-stone-800 hover:bg-stone-700 text-stone-300 cursor-pointer"
+                      >
+                        <RotateCcw className="w-3 h-3" />
+                      </button>
+                    )}
                   </div>
                 </div>
 
-                <div className="flex items-center gap-1.5 shrink-0">
-                  <button
-                    type="button"
-                    onClick={() =>
-                      soundEngine.playGiftEventSound(giftId, config, true)
-                    }
-                    className="px-2 py-1 rounded bg-pink-600/30 hover:bg-pink-500/45 border border-pink-400/50 text-[10px] font-bold text-pink-200 cursor-pointer transition"
-                  >
-                    Nghe thử
-                  </button>
-
-                  <label className="px-2 py-1 rounded bg-stone-800 hover:bg-stone-700 border border-stone-700 text-[10px] font-semibold text-amber-300 flex items-center gap-1 cursor-pointer transition">
-                    <Upload className="w-3 h-3" />
-                    <span>MP3</span>
+                {/* Thanh chỉnh âm lượng riêng cho từng sự kiện tặng quà */}
+                <div className="flex items-center justify-between gap-2 pt-1 border-t border-stone-900">
+                  <span className="text-[10px] text-stone-400">
+                    Âm lượng play món này:
+                  </span>
+                  <div className="flex items-center gap-1.5">
                     <input
-                      type="file"
-                      accept="audio/*"
-                      className="hidden"
+                      type="range"
+                      min={0}
+                      max={1}
+                      step={0.05}
+                      value={itemVol}
                       onChange={(e) => {
-                        const f = e.target.files?.[0];
-                        if (f) {
-                          const reader = new FileReader();
-                          reader.onload = () => {
-                            if (typeof reader.result === 'string') {
-                              const nextUrls = {
-                                ...(config.giftSoundMp3Urls || {}),
-                                [giftId]: reader.result,
-                              };
-                              const nextTitles = {
-                                ...(config.giftSoundMp3Titles || {}),
-                                [giftId]: f.name,
-                              };
-                              const nextConfig: GameConfig = {
-                                ...config,
-                                giftSoundEnabled: true,
-                                giftSoundMp3Urls: nextUrls,
-                                giftSoundMp3Titles: nextTitles,
-                              };
-                              onUpdateConfig({
-                                giftSoundEnabled: true,
-                                giftSoundMp3Urls: nextUrls,
-                                giftSoundMp3Titles: nextTitles,
-                              });
-                              soundEngine.playGiftEventSound(
-                                giftId,
-                                nextConfig,
-                                true
-                              );
-                            }
-                          };
-                          reader.readAsDataURL(f);
-                        }
-                        e.target.value = '';
-                      }}
-                    />
-                  </label>
-
-                  {customUrl && (
-                    <button
-                      type="button"
-                      title="Khôi phục sound mặc định"
-                      onClick={() => {
-                        const nextUrls = { ...(config.giftSoundMp3Urls || {}) };
-                        const nextTitles = {
-                          ...(config.giftSoundMp3Titles || {}),
-                        };
-                        delete nextUrls[giftId];
-                        delete nextTitles[giftId];
+                        const v = Math.max(
+                          0,
+                          Math.min(1, parseFloat(e.target.value))
+                        );
                         onUpdateConfig({
-                          giftSoundMp3Urls: nextUrls,
-                          giftSoundMp3Titles: nextTitles,
+                          giftSoundVolumes: {
+                            ...(config.giftSoundVolumes || {}),
+                            [giftId]: v,
+                          },
                         });
                       }}
-                      className="p-1 rounded bg-stone-800 hover:bg-stone-700 text-stone-300 cursor-pointer"
-                    >
-                      <RotateCcw className="w-3 h-3" />
-                    </button>
-                  )}
+                      className="w-24 accent-pink-400 h-1 bg-stone-800 rounded-lg cursor-pointer"
+                    />
+                    <span className="w-9 text-right text-[10px] font-mono font-bold text-pink-300 tabular-nums">
+                      {Math.round(itemVol * 100)}%
+                    </span>
+                  </div>
                 </div>
               </div>
             );
@@ -1178,76 +1253,144 @@ export const TabAudio: React.FC<TabAudioProps> = ({
           </div>
         </div>
 
-        {/* LUỒNG 1: ĐỌC "CHUẨN BỊ" */}
-        <div className="p-2.5 rounded-lg bg-stone-950/90 border border-emerald-500/35 space-y-2">
-          <div className="flex items-center justify-between gap-2">
-            <div className="flex items-center gap-1.5">
-              <span className="px-1.5 py-0.5 rounded bg-emerald-500/20 border border-emerald-400/50 text-emerald-300 font-mono font-black text-[10px]">
-                Luồng 1
-              </span>
-              <span className="text-[11px] font-bold text-emerald-200">
-                Đọc "Chuẩn bị" (Bảng Chuẩn Bị)
-              </span>
-            </div>
-            <button
-              type="button"
-              onClick={() =>
-                soundEngine.enqueueLessonFlowItems(
-                  [
-                    {
-                      text: config.lessonPrepareTtsText || 'Chuẩn bị',
-                      lang: 'vi',
-                    },
-                  ],
-                  config
-                )
-              }
-              className="px-2 py-0.5 rounded bg-stone-800 hover:bg-stone-700 border border-stone-700 text-[10px] font-semibold text-emerald-300 cursor-pointer shrink-0"
-            >
-              Nghe thử
-            </button>
-          </div>
+        {/* LUỒNG 1: ĐỌC "CHUẨN BỊ" (CHO PHÉP THÊM NHIỀU CÂU & LẤY NGẪU NHIÊN) */}
+        {(() => {
+          const prepList =
+            Array.isArray(config.lessonPrepareTtsTexts) &&
+            config.lessonPrepareTtsTexts.length > 0
+              ? config.lessonPrepareTtsTexts
+              : [config.lessonPrepareTtsText ?? 'Chuẩn bị'];
 
-          <div className="grid grid-cols-12 gap-2 items-end">
-            <div className="col-span-8 space-y-1">
-              <div className="text-[10px] text-stone-400">
-                Nội dung câu nói (Edit được):
-              </div>
-              <input
-                type="text"
-                value={config.lessonPrepareTtsText ?? 'Chuẩn bị'}
-                onChange={(e) =>
-                  onUpdateConfig({ lessonPrepareTtsText: e.target.value })
-                }
-                className="w-full px-2 py-1 rounded bg-stone-900 border border-stone-700 text-[11px] text-stone-100 focus:outline-none focus:border-emerald-400"
-              />
-            </div>
+          const updatePrepList = (nextList: string[]) => {
+            onUpdateConfig({
+              lessonPrepareTtsTexts: nextList,
+              lessonPrepareTtsText: nextList[0] || 'Chuẩn bị',
+            });
+          };
 
-            <div className="col-span-4 space-y-1">
-              <div className="text-[10px] text-stone-400">
-                Thời gian (Mặc định 3s):
+          return (
+            <div className="p-2.5 rounded-lg bg-stone-950/90 border border-emerald-500/35 space-y-2">
+              <div className="flex items-center justify-between gap-2">
+                <div className="flex items-center gap-1.5">
+                  <span className="px-1.5 py-0.5 rounded bg-emerald-500/20 border border-emerald-400/50 text-emerald-300 font-mono font-black text-[10px]">
+                    Luồng 1
+                  </span>
+                  <span className="text-[11px] font-bold text-emerald-200">
+                    Đọc "Chuẩn bị" (Bảng Chuẩn Bị • Lấy ngẫu nhiên trong danh sách)
+                  </span>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => {
+                    const valid = prepList.filter((s) => s.trim());
+                    const pick =
+                      valid.length > 0
+                        ? valid[Math.floor(Math.random() * valid.length)]
+                        : 'Chuẩn bị';
+                    soundEngine.enqueueLessonFlowItems(
+                      [{ text: pick, lang: 'vi' }],
+                      config
+                    );
+                  }}
+                  className="px-2 py-0.5 rounded bg-stone-800 hover:bg-stone-700 border border-stone-700 text-[10px] font-semibold text-emerald-300 cursor-pointer shrink-0"
+                >
+                  Nghe thử ngẫu nhiên
+                </button>
               </div>
-              <div className="flex items-center gap-1">
-                <input
-                  type="number"
-                  min={1}
-                  max={15}
-                  value={config.lessonPrepareDurationSec ?? 3}
-                  onChange={(e) =>
-                    onUpdateConfig({
-                      lessonPrepareDurationSec: Math.max(
-                        1,
-                        Math.min(15, Number(e.target.value) || 3)
-                      ),
-                    })
-                  }
-                  className="w-full px-2 py-1 rounded bg-stone-900 border border-emerald-500/50 text-center font-mono font-bold text-[11px] text-emerald-300 focus:outline-none"
-                />
-                <span className="text-[10px] text-stone-400 shrink-0">giây</span>
+
+              <div className="space-y-1.5">
+                <div className="flex items-center justify-between text-[10px] text-stone-400">
+                  <span>
+                    Danh sách câu nói Luồng 1 ({prepList.length} câu - Khi đọc sẽ chọn ngẫu nhiên):
+                  </span>
+                  <button
+                    type="button"
+                    onClick={() =>
+                      updatePrepList([
+                        ...prepList,
+                        'Các em chú ý lên bảng chuẩn bị câu tiếp theo nhé',
+                      ])
+                    }
+                    className="inline-flex items-center gap-1 px-2 py-0.5 rounded bg-emerald-600/25 hover:bg-emerald-600/40 border border-emerald-400/50 text-emerald-200 font-bold text-[10px] cursor-pointer"
+                  >
+                    <Plus className="w-3 h-3" />
+                    Thêm câu nói
+                  </button>
+                </div>
+
+                <div className="space-y-1.5 max-h-36 overflow-y-auto pr-0.5">
+                  {prepList.map((phrase, idx) => (
+                    <div key={idx} className="flex items-center gap-1.5">
+                      <span className="text-[10px] font-mono text-stone-500 w-4 text-right shrink-0">
+                        {idx + 1}.
+                      </span>
+                      <input
+                        type="text"
+                        value={phrase}
+                        onChange={(e) => {
+                          const next = [...prepList];
+                          next[idx] = e.target.value;
+                          updatePrepList(next);
+                        }}
+                        placeholder="Nhập câu chuẩn bị..."
+                        className="flex-1 px-2 py-1 rounded bg-stone-900 border border-stone-700 text-[11px] text-stone-100 focus:outline-none focus:border-emerald-400"
+                      />
+                      <button
+                        type="button"
+                        onClick={() =>
+                          soundEngine.enqueueLessonFlowItems(
+                            [{ text: phrase || 'Chuẩn bị', lang: 'vi' }],
+                            config
+                          )
+                        }
+                        title="Nghe thử câu này"
+                        className="px-1.5 py-1 rounded bg-stone-800 hover:bg-stone-700 border border-stone-700 text-[10px] text-emerald-300 cursor-pointer shrink-0"
+                      >
+                        🔊
+                      </button>
+                      {prepList.length > 1 && (
+                        <button
+                          type="button"
+                          onClick={() =>
+                            updatePrepList(prepList.filter((_, i) => i !== idx))
+                          }
+                          title="Xóa câu này"
+                          className="p-1 rounded bg-rose-950/60 hover:bg-rose-900/70 border border-rose-500/40 text-rose-300 cursor-pointer shrink-0"
+                        >
+                          <Trash2 className="w-3 h-3" />
+                        </button>
+                      )}
+                    </div>
+                  ))}
+                </div>
+              </div>
+
+              <div className="flex items-center justify-between gap-2 pt-1 border-t border-stone-800/80">
+                <span className="text-[10px] text-stone-400">
+                  Thời gian Luồng 1 (Mặc định 3s):
+                </span>
+                <div className="flex items-center gap-1">
+                  <input
+                    type="number"
+                    min={1}
+                    max={15}
+                    value={config.lessonPrepareDurationSec ?? 3}
+                    onChange={(e) =>
+                      onUpdateConfig({
+                        lessonPrepareDurationSec: Math.max(
+                          1,
+                          Math.min(15, Number(e.target.value) || 3)
+                        ),
+                      })
+                    }
+                    className="w-16 px-2 py-1 rounded bg-stone-900 border border-emerald-500/50 text-center font-mono font-bold text-[11px] text-emerald-300 focus:outline-none"
+                  />
+                  <span className="text-[10px] text-stone-400 shrink-0">giây</span>
+                </div>
               </div>
             </div>
-          </div>
-        </div>
+          );
+        })()}
 
         {/* LUỒNG 2: ĐỌC CÂU HỎI */}
         <div className="p-2.5 rounded-lg bg-stone-950/90 border border-sky-500/35 space-y-2">
@@ -1330,53 +1473,198 @@ export const TabAudio: React.FC<TabAudioProps> = ({
           </div>
         </div>
 
-        {/* LUỒNG 3: ĐỢI TRẢ LỜI / GỢI Ý */}
-        <div className="p-2.5 rounded-lg bg-stone-950/90 border border-amber-500/35 space-y-2">
-          <div className="flex items-center justify-between gap-2">
-            <div className="flex items-center gap-1.5">
-              <span className="px-1.5 py-0.5 rounded bg-amber-500/20 border border-amber-400/50 text-amber-300 font-mono font-black text-[10px]">
-                Luồng 3
-              </span>
-              <span className="text-[11px] font-bold text-amber-200">
-                Đợi trả lời / Gợi ý (Duy trì Bảng Câu Hỏi)
-              </span>
-            </div>
-          </div>
+        {/* LUỒNG 3: ĐỢI TRẢ LỜI / GỢI Ý & CÂU NÓI VU VƠ CỦA CÔ */}
+        {(() => {
+          const idleList =
+            Array.isArray(config.lessonIdleChatTexts) &&
+            config.lessonIdleChatTexts.length > 0
+              ? config.lessonIdleChatTexts
+              : DEFAULT_CONFIG.lessonIdleChatTexts || [
+                  'Câu này dễ lắm luôn đó các em ơi, nhanh tay bình luận nào!',
+                ];
 
-          <div className="flex items-center justify-between gap-2 text-[10px] bg-stone-900/70 px-2 py-1 rounded border border-stone-800/80">
-            <span className="text-stone-400">Nội dung câu nói:</span>
-            <span className="font-mono text-stone-400">
-              🔒 Không phát lời cố định (Đợi học sinh trả lời & mở chữ gợi ý)
-            </span>
-          </div>
+          const updateIdleList = (nextList: string[]) => {
+            onUpdateConfig({ lessonIdleChatTexts: nextList });
+          };
 
-          <div className="flex items-center justify-between gap-2 pt-0.5">
-            <span className="text-[10.5px] text-amber-200 font-semibold">
-              Thời gian Luồng 2 & 3 tính chung (Edit được - Mặc định 12s):
-            </span>
-            <div className="flex items-center gap-1.5">
-              <input
-                type="number"
-                min={5}
-                max={90}
-                value={config.hudLayout.classBoardQuestionDurationSec || 12}
-                onChange={(e) =>
-                  onUpdateConfig({
-                    hudLayout: {
-                      ...config.hudLayout,
-                      classBoardQuestionDurationSec: Math.max(
-                        5,
-                        Math.min(90, Number(e.target.value) || 12)
-                      ),
-                    },
-                  })
-                }
-                className="w-16 px-2 py-1 rounded bg-stone-900 border border-amber-500/50 text-center font-mono font-bold text-[11px] text-amber-300 focus:outline-none"
-              />
-              <span className="text-[10px] text-stone-400">giây</span>
+          return (
+            <div className="p-2.5 rounded-lg bg-stone-950/90 border border-amber-500/35 space-y-2">
+              <div className="flex items-center justify-between gap-2">
+                <div className="flex items-center gap-1.5">
+                  <span className="px-1.5 py-0.5 rounded bg-amber-500/20 border border-amber-400/50 text-amber-300 font-mono font-black text-[10px]">
+                    Luồng 3
+                  </span>
+                  <span className="text-[11px] font-bold text-amber-200">
+                    Đợi trả lời / Gợi ý + Cô nói 1 câu vu vơ
+                  </span>
+                </div>
+
+                <div className="flex items-center gap-2">
+                  <label className="flex items-center gap-1 text-[10.5px] font-semibold text-emerald-300 cursor-pointer">
+                    <input
+                      type="checkbox"
+                      checked={config.lessonIdleChatEnabled !== false}
+                      onChange={(e) =>
+                        onUpdateConfig({
+                          lessonIdleChatEnabled: e.target.checked,
+                        })
+                      }
+                      className="accent-emerald-500 w-3.5 h-3.5 rounded cursor-pointer"
+                    />
+                    <span>Bật nói vu vơ</span>
+                  </label>
+
+                  <button
+                    type="button"
+                    onClick={() => {
+                      const valid = idleList.filter((s) => s.trim());
+                      const pick =
+                        valid.length > 0
+                          ? valid[Math.floor(Math.random() * valid.length)]
+                          : 'Cố lên cả lớp ơi!';
+                      soundEngine.enqueueLessonFlowItems(
+                        [{ text: pick, lang: 'vi' }],
+                        config
+                      );
+                    }}
+                    className="px-2 py-0.5 rounded bg-stone-800 hover:bg-stone-700 border border-stone-700 text-[10px] font-semibold text-amber-300 cursor-pointer shrink-0"
+                  >
+                    Nghe thử
+                  </button>
+                </div>
+              </div>
+
+              <div className="grid grid-cols-2 gap-2 p-2 rounded bg-stone-900/75 border border-stone-800/80">
+                <div className="flex items-center justify-between gap-1.5">
+                  <span className="text-[10px] text-amber-200 font-semibold">
+                    Trễ trước khi nói vu vơ:
+                  </span>
+                  <div className="flex items-center gap-1">
+                    <input
+                      type="number"
+                      min={1}
+                      max={30}
+                      step={0.5}
+                      value={config.lessonIdleChatDelaySec ?? 4}
+                      onChange={(e) =>
+                        onUpdateConfig({
+                          lessonIdleChatDelaySec: Math.max(
+                            1,
+                            Math.min(30, Number(e.target.value) || 4)
+                          ),
+                        })
+                      }
+                      className="w-14 px-1.5 py-0.5 rounded bg-stone-950 border border-amber-500/50 text-center font-mono font-bold text-[11px] text-amber-300 focus:outline-none"
+                    />
+                    <span className="text-[10px] text-stone-400">giây</span>
+                  </div>
+                </div>
+
+                <div className="flex items-center justify-between gap-1.5">
+                  <span className="text-[10px] text-amber-200 font-semibold">
+                    Tổng TG Luồng 2 & 3:
+                  </span>
+                  <div className="flex items-center gap-1">
+                    <input
+                      type="number"
+                      min={5}
+                      max={90}
+                      value={
+                        config.hudLayout.classBoardQuestionDurationSec || 12
+                      }
+                      onChange={(e) =>
+                        onUpdateConfig({
+                          hudLayout: {
+                            ...config.hudLayout,
+                            classBoardQuestionDurationSec: Math.max(
+                              5,
+                              Math.min(90, Number(e.target.value) || 12)
+                            ),
+                          },
+                        })
+                      }
+                      className="w-14 px-1.5 py-0.5 rounded bg-stone-950 border border-amber-500/50 text-center font-mono font-bold text-[11px] text-amber-300 focus:outline-none"
+                    />
+                    <span className="text-[10px] text-stone-400">giây</span>
+                  </div>
+                </div>
+              </div>
+
+              <div className="space-y-1.5">
+                <div className="flex items-center justify-between text-[10px] text-stone-400">
+                  <span>
+                    Danh sách câu nói vu vơ ({idleList.length} câu - Chọn ngẫu nhiên 1 câu):
+                  </span>
+                  <button
+                    type="button"
+                    onClick={() =>
+                      updateIdleList([
+                        ...idleList,
+                        'Nhanh tay bình luận đáp án đúng để nhận điểm thưởng nào các em!',
+                      ])
+                    }
+                    className="inline-flex items-center gap-1 px-2 py-0.5 rounded bg-amber-600/25 hover:bg-amber-600/40 border border-amber-400/50 text-amber-200 font-bold text-[10px] cursor-pointer"
+                  >
+                    <Plus className="w-3 h-3" />
+                    Thêm câu vu vơ
+                  </button>
+                </div>
+
+                <div className="space-y-1.5 max-h-40 overflow-y-auto pr-0.5">
+                  {idleList.map((phrase, idx) => (
+                    <div key={idx} className="flex items-center gap-1.5">
+                      <span className="text-[10px] font-mono text-stone-500 w-4 text-right shrink-0">
+                        {idx + 1}.
+                      </span>
+                      <input
+                        type="text"
+                        value={phrase}
+                        onChange={(e) => {
+                          const next = [...idleList];
+                          next[idx] = e.target.value;
+                          updateIdleList(next);
+                        }}
+                        placeholder="Nhập câu nói vu vơ trong lúc chờ trả lời..."
+                        className="flex-1 px-2 py-1 rounded bg-stone-900 border border-stone-700 text-[11px] text-stone-100 focus:outline-none focus:border-amber-400"
+                      />
+                      <button
+                        type="button"
+                        onClick={() =>
+                          soundEngine.enqueueLessonFlowItems(
+                            [{ text: phrase, lang: 'vi' }],
+                            config
+                          )
+                        }
+                        title="Nghe thử câu này"
+                        className="px-1.5 py-1 rounded bg-stone-800 hover:bg-stone-700 border border-stone-700 text-[10px] text-amber-300 cursor-pointer shrink-0"
+                      >
+                        🔊
+                      </button>
+                      {idleList.length > 1 && (
+                        <button
+                          type="button"
+                          onClick={() =>
+                            updateIdleList(idleList.filter((_, i) => i !== idx))
+                          }
+                          title="Xóa câu này"
+                          className="p-1 rounded bg-rose-950/60 hover:bg-rose-900/70 border border-rose-500/40 text-rose-300 cursor-pointer shrink-0"
+                        >
+                          <Trash2 className="w-3 h-3" />
+                        </button>
+                      )}
+                    </div>
+                  ))}
+                </div>
+              </div>
+
+              <div className="flex items-center justify-between gap-2 text-[9.5px] bg-emerald-950/30 px-2 py-1 rounded border border-emerald-500/30 text-emerald-300">
+                <span>
+                  🛡️ Bộ lọc an toàn: Nếu hết giờ mà cô chưa nói xong câu vu vơ thì chờ cô đọc nốt câu mới chuyển sang Luồng 4.
+                </span>
+              </div>
             </div>
-          </div>
-        </div>
+          );
+        })()}
 
         {/* LUỒNG 4: ĐỌC CÂU TRẢ LỜI */}
         <div className="p-2.5 rounded-lg bg-stone-950/90 border border-emerald-500/35 space-y-2">
@@ -1456,142 +1744,483 @@ export const TabAudio: React.FC<TabAudioProps> = ({
           </div>
         </div>
 
-        {/* LUỒNG 5: ĐỌC KẾT QUẢ & CẬP NHẬT CHỖ NGỒI */}
-        <div className="p-2.5 rounded-lg bg-stone-950/90 border border-cyan-500/35 space-y-2">
-          <div className="flex items-center justify-between gap-2">
-            <div className="flex items-center gap-1.5">
-              <span className="px-1.5 py-0.5 rounded bg-cyan-500/20 border border-cyan-400/50 text-cyan-300 font-mono font-black text-[10px]">
-                Luồng 5
-              </span>
-              <span className="text-[11px] font-bold text-cyan-200">
-                Đọc kết quả (Bảng Kết Quả • Bắt đầu Luồng 5 cập nhật chỗ ngồi)
-              </span>
-            </div>
+        {/* LUỒNG 5: ĐỌC KẾT QUẢ & CẬP NHẬT CHỖ NGỒI (PHÂN NHÓM THEO ĐIỀU KIỆN) */}
+        {(() => {
+          const flow5Groups = {
+            ...(DEFAULT_CONFIG.lessonFlow5ConditionalTemplates || {
+              normal: [],
+              streak_2: [],
+              streak_3: [],
+              streak_5_plus: [],
+              streak_broken: [],
+            }),
+            ...(config.lessonFlow5ConditionalTemplates || {}),
+          };
 
-            <div className="flex items-center gap-2">
-              <label className="flex items-center gap-1 text-[10.5px] font-semibold text-emerald-300 cursor-pointer">
-                <input
-                  type="checkbox"
-                  checked={config.quizResultTtsEnabled !== false}
-                  onChange={(e) =>
-                    onUpdateConfig({ quizResultTtsEnabled: e.target.checked })
+          const condMeta5: Array<{
+            key: LessonFlow5ConditionKey;
+            label: string;
+            desc: string;
+          }> = [
+            {
+              key: 'normal',
+              label: 'ĐK Bình thường',
+              desc: 'Khi người đạt Top 1 trả lời nhanh nhất câu này mới thắng lần 1',
+            },
+            {
+              key: 'streak_2',
+              label: 'Top 1 liên tục 2 lần',
+              desc: 'Khi cùng 1 bạn đạt Top 1 trả lời nhanh nhất đúng 2 câu liên tiếp',
+            },
+            {
+              key: 'streak_3',
+              label: 'Top 1 liên tục 3 lần',
+              desc: 'Khi cùng 1 bạn đạt Top 1 trả lời nhanh nhất 3-4 câu liên tiếp',
+            },
+            {
+              key: 'streak_5_plus',
+              label: 'Top 1 liên tục ≥ 5 lần',
+              desc: 'Khi cùng 1 bạn đạt Top 1 trả lời nhanh nhất từ 5 câu liên tiếp trở lên',
+            },
+            {
+              key: 'streak_broken',
+              label: 'Khi combo bị phá',
+              desc: 'Khi chuỗi Top 1 liên tiếp (≥ 2 lần) của bạn trước bị người khác phá vỡ',
+            },
+          ];
+
+          const currentList5 =
+            Array.isArray(flow5Groups[activeFlow5Cond]) &&
+            flow5Groups[activeFlow5Cond].length > 0
+              ? flow5Groups[activeFlow5Cond]
+              : [''];
+
+          const updateFlow5CondList = (
+            condKey: LessonFlow5ConditionKey,
+            nextArr: string[]
+          ) => {
+            const nextGroups = {
+              ...flow5Groups,
+              [condKey]: nextArr,
+            };
+            onUpdateConfig({
+              lessonFlow5ConditionalTemplates: nextGroups,
+              ...(condKey === 'normal' && nextArr[0]
+                ? {
+                    quizResultTtsTemplate: nextArr[0],
+                    quizResultTtsTemplates: nextArr,
                   }
-                  className="accent-emerald-500 w-3.5 h-3.5 rounded cursor-pointer"
-                />
-                <span>Bật đọc</span>
-              </label>
+                : {}),
+            });
+          };
 
-              <button
-                type="button"
-                onClick={() => {
-                  const preview = (
-                    config.quizResultTtsTemplate ||
-                    'Có [HọcKé] bạn học ké và [TrongLớp] bạn trong lớp trả lời đúng, chúc mừng bạn [Top1] trả lời nhanh nhất!'
-                  )
-                    .replace(/\[HọcKé\]|\{outsideCount\}/gi, '5')
-                    .replace(/\[TrongLớp\]|\{classCount\}/gi, '8')
-                    .replace(/\[Top1Lớp\]|\[Top1\]|\{fastestName\}/gi, 'Bảo Ngọc');
-                  soundEngine.enqueueLessonFlowItems(
-                    [{ text: preview, lang: 'vi' }],
-                    config
-                  );
-                }}
-                className="px-2 py-0.5 rounded bg-stone-800 hover:bg-stone-700 border border-stone-700 text-[10px] font-semibold text-cyan-300 cursor-pointer shrink-0"
-              >
-                Nghe thử
-              </button>
+          return (
+            <div className="p-2.5 rounded-lg bg-stone-950/90 border border-cyan-500/35 space-y-2">
+              <div className="flex items-center justify-between gap-2">
+                <div className="flex items-center gap-1.5">
+                  <span className="px-1.5 py-0.5 rounded bg-cyan-500/20 border border-cyan-400/50 text-cyan-300 font-mono font-black text-[10px]">
+                    Luồng 5
+                  </span>
+                  <span className="text-[11px] font-bold text-cyan-200">
+                    Đọc kết quả (Bảng Kết Quả • Phân nhóm câu nói theo điều kiện)
+                  </span>
+                </div>
+
+                <div className="flex items-center gap-2">
+                  <label className="flex items-center gap-1 text-[10.5px] font-semibold text-emerald-300 cursor-pointer">
+                    <input
+                      type="checkbox"
+                      checked={config.quizResultTtsEnabled !== false}
+                      onChange={(e) =>
+                        onUpdateConfig({
+                          quizResultTtsEnabled: e.target.checked,
+                        })
+                      }
+                      className="accent-emerald-500 w-3.5 h-3.5 rounded cursor-pointer"
+                    />
+                    <span>Bật đọc</span>
+                  </label>
+
+                  <button
+                    type="button"
+                    onClick={() => {
+                      const valid = currentList5.filter((s) => s.trim());
+                      const raw =
+                        valid.length > 0
+                          ? valid[Math.floor(Math.random() * valid.length)]
+                          : config.quizResultTtsTemplate ||
+                            'Có [HọcKé] bạn học ké và [TrongLớp] bạn trong lớp trả lời đúng, chúc mừng bạn [Top1] trả lời nhanh nhất!';
+                      const preview = raw
+                        .replace(/\[HọcKé\]|\{outsideCount\}/gi, '5')
+                        .replace(/\[TrongLớp\]|\{classCount\}/gi, '8')
+                        .replace(/\[Top1Lớp\]|\[Top1\]|\{fastestName\}/gi, 'Bảo Ngọc')
+                        .replace(/\[ChuỗiTop1\]|\[SốLầnLiênTiếp\]/gi, '5')
+                        .replace(/\[Top1Cũ\]|\[NgườiBịPhá\]/gi, 'Minh Khang')
+                        .replace(/\[ChuỗiCũ\]/gi, '4');
+                      soundEngine.enqueueLessonFlowItems(
+                        [{ text: preview, lang: 'vi' }],
+                        config
+                      );
+                    }}
+                    className="px-2 py-0.5 rounded bg-stone-800 hover:bg-stone-700 border border-stone-700 text-[10px] font-semibold text-cyan-300 cursor-pointer shrink-0"
+                  >
+                    Nghe thử nhóm này
+                  </button>
+                </div>
+              </div>
+
+              {/* Bộ nút chọn nhóm điều kiện Luồng 5 */}
+              <div className="space-y-1">
+                <div className="text-[10px] text-stone-400">
+                  Chọn điều kiện kích hoạt câu nói (mỗi điều kiện lấy ngẫu nhiên 1 câu trong nhóm):
+                </div>
+                <div className="flex flex-wrap gap-1">
+                  {condMeta5.map((c) => {
+                    const count = (flow5Groups[c.key] || []).filter((s) =>
+                      Boolean(s && s.trim())
+                    ).length;
+                    const isActive = activeFlow5Cond === c.key;
+                    return (
+                      <button
+                        key={c.key}
+                        type="button"
+                        onClick={() => setActiveFlow5Cond(c.key)}
+                        className={`px-2 py-1 rounded text-[10px] font-bold transition-all cursor-pointer border ${
+                          isActive
+                            ? 'bg-cyan-500/25 border-cyan-400 text-cyan-200 shadow-sm'
+                            : 'bg-stone-900 border-stone-800 text-stone-400 hover:text-stone-200'
+                        }`}
+                      >
+                        {c.label} ({count})
+                      </button>
+                    );
+                  })}
+                </div>
+                <div className="text-[9.5px] text-cyan-300/90 italic">
+                  💡 {condMeta5.find((c) => c.key === activeFlow5Cond)?.desc}
+                </div>
+              </div>
+
+              <div className="space-y-1.5">
+                <div className="flex flex-wrap items-center justify-between gap-1 text-[10px] text-stone-400">
+                  <span>
+                    Biến hỗ trợ:{' '}
+                    <span className="font-mono text-cyan-300">
+                      [HọcKé], [TrongLớp], [Top1], [ChuỗiTop1], [Top1Cũ]
+                    </span>
+                  </span>
+                  <button
+                    type="button"
+                    onClick={() =>
+                      updateFlow5CondList(activeFlow5Cond, [
+                        ...currentList5,
+                        'Chúc mừng bạn [Top1] đã trả lời nhanh nhất câu hỏi này!',
+                      ])
+                    }
+                    className="inline-flex items-center gap-1 px-2 py-0.5 rounded bg-cyan-600/25 hover:bg-cyan-600/40 border border-cyan-400/50 text-cyan-200 font-bold text-[10px] cursor-pointer"
+                  >
+                    <Plus className="w-3 h-3" />
+                    Thêm câu vào ĐK này
+                  </button>
+                </div>
+
+                <div className="space-y-1.5 max-h-44 overflow-y-auto pr-0.5">
+                  {currentList5.map((tpl, idx) => (
+                    <div key={idx} className="flex items-start gap-1.5">
+                      <span className="text-[10px] font-mono text-stone-500 w-4 text-right pt-1.5 shrink-0">
+                        {idx + 1}.
+                      </span>
+                      <textarea
+                        rows={2}
+                        value={tpl}
+                        onChange={(e) => {
+                          const next = [...currentList5];
+                          next[idx] = e.target.value;
+                          updateFlow5CondList(activeFlow5Cond, next);
+                        }}
+                        placeholder="Nhập câu đọc kết quả cho điều kiện này..."
+                        className="flex-1 px-2 py-1 rounded bg-stone-900 border border-stone-700 text-[11px] text-stone-100 focus:outline-none focus:border-cyan-400 resize-y"
+                      />
+                      <div className="flex flex-col gap-1 shrink-0">
+                        <button
+                          type="button"
+                          onClick={() => {
+                            const preview = (tpl || '')
+                              .replace(/\[HọcKé\]|\{outsideCount\}/gi, '5')
+                              .replace(/\[TrongLớp\]|\{classCount\}/gi, '8')
+                              .replace(/\[Top1Lớp\]|\[Top1\]|\{fastestName\}/gi, 'Bảo Ngọc')
+                              .replace(/\[ChuỗiTop1\]|\[SốLầnLiênTiếp\]/gi, '5')
+                              .replace(/\[Top1Cũ\]|\[NgườiBịPhá\]/gi, 'Minh Khang')
+                              .replace(/\[ChuỗiCũ\]/gi, '4');
+                            soundEngine.enqueueLessonFlowItems(
+                              [{ text: preview, lang: 'vi' }],
+                              config
+                            );
+                          }}
+                          title="Nghe thử câu này"
+                          className="px-1.5 py-1 rounded bg-stone-800 hover:bg-stone-700 border border-stone-700 text-[10px] text-cyan-300 cursor-pointer"
+                        >
+                          🔊
+                        </button>
+                        {currentList5.length > 1 && (
+                          <button
+                            type="button"
+                            onClick={() =>
+                              updateFlow5CondList(
+                                activeFlow5Cond,
+                                currentList5.filter((_, i) => i !== idx)
+                              )
+                            }
+                            title="Xóa câu này"
+                            className="p-1 rounded bg-rose-950/60 hover:bg-rose-900/70 border border-rose-500/40 text-rose-300 cursor-pointer flex items-center justify-center"
+                          >
+                            <Trash2 className="w-3 h-3" />
+                          </button>
+                        )}
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              </div>
+
+              <div className="flex items-center justify-between gap-2 text-[10px] bg-stone-900/70 px-2 py-1 rounded border border-stone-800/80">
+                <span className="text-stone-400">Thời gian luồng:</span>
+                <span className="font-mono font-bold text-emerald-300">
+                  🔒 Tự động: Nói xong chuyển sang Luồng 6 • Đồng loạt hiện thẻ điểm học sinh trả lời đúng
+                </span>
+              </div>
             </div>
-          </div>
+          );
+        })()}
 
-          <div className="space-y-1">
-            <div className="flex flex-wrap items-center justify-between gap-1 text-[10px] text-stone-400">
-              <span>Format câu nói (Edit được):</span>
-              <span className="font-mono text-[9.5px] text-cyan-300">
-                Biến: [HọcKé], [TrongLớp], [Top1]
-              </span>
+        {/* LUỒNG 6: ĐỌC XẾP HẠNG TRONG LỚP (PHÂN NHÓM THEO ĐIỀU KIỆN) */}
+        {(() => {
+          const flow6Groups = {
+            ...(DEFAULT_CONFIG.lessonFlow6ConditionalTemplates || {
+              normal: [],
+              top1_3: [],
+              top1_5: [],
+              top1_10: [],
+              top1_20: [],
+              top1_30_plus: [],
+            }),
+            ...(config.lessonFlow6ConditionalTemplates || {}),
+          };
+
+          const condMeta6: Array<{
+            key: LessonFlow6ConditionKey;
+            label: string;
+            desc: string;
+          }> = [
+            {
+              key: 'normal',
+              label: 'ĐK Bình thường',
+              desc: 'Khi bạn Top 1 BXH giữ vị trí dẫn đầu 1-2 vòng thông thường',
+            },
+            {
+              key: 'top1_3',
+              label: 'Top 1 liên tục 3 lần',
+              desc: 'Khi bạn Top 1 BXH giữ ngôi đầu liên tiếp 3-4 lần',
+            },
+            {
+              key: 'top1_5',
+              label: 'Top 1 liên tục 5 lần',
+              desc: 'Khi bạn Top 1 BXH giữ ngôi đầu liên tiếp 5-9 lần',
+            },
+            {
+              key: 'top1_10',
+              label: 'Top 1 liên tục 10 lần',
+              desc: 'Khi bạn Top 1 BXH giữ ngôi đầu liên tiếp 10-19 lần',
+            },
+            {
+              key: 'top1_20',
+              label: 'Top 1 liên tục 20 lần',
+              desc: 'Khi bạn Top 1 BXH giữ ngôi đầu liên tiếp 20-29 lần',
+            },
+            {
+              key: 'top1_30_plus',
+              label: 'Top 1 từ 30 lần',
+              desc: 'Khi bạn Top 1 BXH thống trị ngôi đầu từ 30 lần liên tiếp trở lên',
+            },
+          ];
+
+          const currentList6 =
+            Array.isArray(flow6Groups[activeFlow6Cond]) &&
+            flow6Groups[activeFlow6Cond].length > 0
+              ? flow6Groups[activeFlow6Cond]
+              : [''];
+
+          const updateFlow6CondList = (
+            condKey: LessonFlow6ConditionKey,
+            nextArr: string[]
+          ) => {
+            const nextGroups = {
+              ...flow6Groups,
+              [condKey]: nextArr,
+            };
+            onUpdateConfig({
+              lessonFlow6ConditionalTemplates: nextGroups,
+              ...(condKey === 'normal' && nextArr[0]
+                ? { lessonRankingTtsTemplate: nextArr[0] }
+                : {}),
+            });
+          };
+
+          return (
+            <div className="p-2.5 rounded-lg bg-stone-950/90 border border-purple-500/35 space-y-2">
+              <div className="flex items-center justify-between gap-2">
+                <div className="flex items-center gap-1.5">
+                  <span className="px-1.5 py-0.5 rounded bg-purple-500/20 border border-purple-400/50 text-purple-300 font-mono font-black text-[10px]">
+                    Luồng 6
+                  </span>
+                  <span className="text-[11px] font-bold text-purple-200">
+                    Đọc xếp hạng (Bảng Xếp Hạng Trong Lớp • Phân nhóm theo ĐK)
+                  </span>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => {
+                    const valid = currentList6.filter((s) => s.trim());
+                    const raw =
+                      valid.length > 0
+                        ? valid[Math.floor(Math.random() * valid.length)]
+                        : config.lessonRankingTtsTemplate ||
+                          'Top 1 bảng xếp hạng là bạn [Top1Rank] với [ĐiểmTop1] điểm, chúng ta đến với câu hỏi tiếp theo nhé!';
+                    const preview = raw
+                      .replace(/\[Top1Rank\]|\[Top1BXH\]|\[Top1\]|\{top1Name\}/gi, 'Bảo Ngọc')
+                      .replace(/\[ĐiểmTop1\]|\[Điểm\]|\{top1Points\}/gi, '120')
+                      .replace(/\[ChuỗiTop1Rank\]|\[ChuỗiTop1\]/gi, '10');
+                    soundEngine.enqueueLessonFlowItems(
+                      [{ text: preview, lang: 'vi' }],
+                      config
+                    );
+                  }}
+                  className="px-2 py-0.5 rounded bg-stone-800 hover:bg-stone-700 border border-stone-700 text-[10px] font-semibold text-purple-300 cursor-pointer shrink-0"
+                >
+                  Nghe thử nhóm này
+                </button>
+              </div>
+
+              {/* Bộ nút chọn nhóm điều kiện Luồng 6 */}
+              <div className="space-y-1">
+                <div className="text-[10px] text-stone-400">
+                  Chọn điều kiện chuỗi giữ Top 1 BXH liên tiếp:
+                </div>
+                <div className="flex flex-wrap gap-1">
+                  {condMeta6.map((c) => {
+                    const count = (flow6Groups[c.key] || []).filter((s) =>
+                      Boolean(s && s.trim())
+                    ).length;
+                    const isActive = activeFlow6Cond === c.key;
+                    return (
+                      <button
+                        key={c.key}
+                        type="button"
+                        onClick={() => setActiveFlow6Cond(c.key)}
+                        className={`px-2 py-1 rounded text-[10px] font-bold transition-all cursor-pointer border ${
+                          isActive
+                            ? 'bg-purple-500/25 border-purple-400 text-purple-200 shadow-sm'
+                            : 'bg-stone-900 border-stone-800 text-stone-400 hover:text-stone-200'
+                        }`}
+                      >
+                        {c.label} ({count})
+                      </button>
+                    );
+                  })}
+                </div>
+                <div className="text-[9.5px] text-purple-300/90 italic">
+                  💡 {condMeta6.find((c) => c.key === activeFlow6Cond)?.desc}
+                </div>
+              </div>
+
+              <div className="space-y-1.5">
+                <div className="flex flex-wrap items-center justify-between gap-1 text-[10px] text-stone-400">
+                  <span>
+                    Biến hỗ trợ:{' '}
+                    <span className="font-mono text-purple-300">
+                      [Top1Rank], [ĐiểmTop1], [ChuỗiTop1Rank]
+                    </span>
+                  </span>
+                  <button
+                    type="button"
+                    onClick={() =>
+                      updateFlow6CondList(activeFlow6Cond, [
+                        ...currentList6,
+                        'Top 1 bảng xếp hạng vẫn là bạn [Top1Rank] với [ĐiểmTop1] điểm!',
+                      ])
+                    }
+                    className="inline-flex items-center gap-1 px-2 py-0.5 rounded bg-purple-600/25 hover:bg-purple-600/40 border border-purple-400/50 text-purple-200 font-bold text-[10px] cursor-pointer"
+                  >
+                    <Plus className="w-3 h-3" />
+                    Thêm câu vào ĐK này
+                  </button>
+                </div>
+
+                <div className="space-y-1.5 max-h-44 overflow-y-auto pr-0.5">
+                  {currentList6.map((tpl, idx) => (
+                    <div key={idx} className="flex items-start gap-1.5">
+                      <span className="text-[10px] font-mono text-stone-500 w-4 text-right pt-1.5 shrink-0">
+                        {idx + 1}.
+                      </span>
+                      <textarea
+                        rows={2}
+                        value={tpl}
+                        onChange={(e) => {
+                          const next = [...currentList6];
+                          next[idx] = e.target.value;
+                          updateFlow6CondList(activeFlow6Cond, next);
+                        }}
+                        placeholder="Nhập câu đọc xếp hạng cho điều kiện này..."
+                        className="flex-1 px-2 py-1 rounded bg-stone-900 border border-stone-700 text-[11px] text-stone-100 focus:outline-none focus:border-purple-400 resize-y"
+                      />
+                      <div className="flex flex-col gap-1 shrink-0">
+                        <button
+                          type="button"
+                          onClick={() => {
+                            const preview = (tpl || '')
+                              .replace(/\[Top1Rank\]|\[Top1BXH\]|\[Top1\]|\{top1Name\}/gi, 'Bảo Ngọc')
+                              .replace(/\[ĐiểmTop1\]|\[Điểm\]|\{top1Points\}/gi, '120')
+                              .replace(/\[ChuỗiTop1Rank\]|\[ChuỗiTop1\]/gi, '10');
+                            soundEngine.enqueueLessonFlowItems(
+                              [{ text: preview, lang: 'vi' }],
+                              config
+                            );
+                          }}
+                          title="Nghe thử câu này"
+                          className="px-1.5 py-1 rounded bg-stone-800 hover:bg-stone-700 border border-stone-700 text-[10px] text-purple-300 cursor-pointer"
+                        >
+                          🔊
+                        </button>
+                        {currentList6.length > 1 && (
+                          <button
+                            type="button"
+                            onClick={() =>
+                              updateFlow6CondList(
+                                activeFlow6Cond,
+                                currentList6.filter((_, i) => i !== idx)
+                              )
+                            }
+                            title="Xóa câu này"
+                            className="p-1 rounded bg-rose-950/60 hover:bg-rose-900/70 border border-rose-500/40 text-rose-300 cursor-pointer flex items-center justify-center"
+                          >
+                            <Trash2 className="w-3 h-3" />
+                          </button>
+                        )}
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              </div>
+
+              <div className="flex items-center justify-between gap-2 text-[10px] bg-stone-900/70 px-2 py-1 rounded border border-stone-800/80">
+                <span className="text-stone-400">Thời gian luồng:</span>
+                <span className="font-mono font-bold text-emerald-300">
+                  🔒 Tự động: Giữ nguyên danh sách Top đầu xuyên suốt luồng • Nói xong kết thúc câu hỏi
+                </span>
+              </div>
             </div>
-            <textarea
-              rows={2}
-              value={
-                config.quizResultTtsTemplate ??
-                'Có [HọcKé] bạn học ké và [TrongLớp] bạn trong lớp trả lời đúng, chúc mừng bạn [Top1] trả lời nhanh nhất!'
-              }
-              onChange={(e) =>
-                onUpdateConfig({
-                  quizResultTtsTemplate: e.target.value,
-                  quizResultTtsTemplates: [e.target.value],
-                })
-              }
-              className="w-full px-2 py-1.5 rounded bg-stone-900 border border-stone-700 text-[11px] text-stone-100 focus:outline-none focus:border-cyan-400 resize-y"
-            />
-          </div>
-
-          <div className="flex items-center justify-between gap-2 text-[10px] bg-stone-900/70 px-2 py-1 rounded border border-stone-800/80">
-            <span className="text-stone-400">Thời gian luồng:</span>
-            <span className="font-mono font-bold text-emerald-300">
-              🔒 Tự động: Nói xong chuyển sang Luồng 6
-            </span>
-          </div>
-        </div>
-
-        {/* LUỒNG 6: ĐỌC XẾP HẠNG TRONG LỚP */}
-        <div className="p-2.5 rounded-lg bg-stone-950/90 border border-purple-500/35 space-y-2">
-          <div className="flex items-center justify-between gap-2">
-            <div className="flex items-center gap-1.5">
-              <span className="px-1.5 py-0.5 rounded bg-purple-500/20 border border-purple-400/50 text-purple-300 font-mono font-black text-[10px]">
-                Luồng 6
-              </span>
-              <span className="text-[11px] font-bold text-purple-200">
-                Đọc xếp hạng (Bảng Xếp Hạng Trong Lớp)
-              </span>
-            </div>
-            <button
-              type="button"
-              onClick={() => {
-                const preview = (
-                  config.lessonRankingTtsTemplate ||
-                  'Top 1 bảng xếp hạng là bạn [Top1Rank] với [ĐiểmTop1] điểm, chúng ta đến với câu hỏi tiếp theo nhé!'
-                )
-                  .replace(/\[Top1Rank\]|\[Top1BXH\]|\[Top1\]|\{top1Name\}/gi, 'Bảo Ngọc')
-                  .replace(/\[ĐiểmTop1\]|\[Điểm\]|\{top1Points\}/gi, '50');
-                soundEngine.enqueueLessonFlowItems(
-                  [{ text: preview, lang: 'vi' }],
-                  config
-                );
-              }}
-              className="px-2 py-0.5 rounded bg-stone-800 hover:bg-stone-700 border border-stone-700 text-[10px] font-semibold text-purple-300 cursor-pointer shrink-0"
-            >
-              Nghe thử
-            </button>
-          </div>
-
-          <div className="space-y-1">
-            <div className="flex flex-wrap items-center justify-between gap-1 text-[10px] text-stone-400">
-              <span>Format câu nói (Edit được):</span>
-              <span className="font-mono text-[9.5px] text-purple-300">
-                Biến: [Top1Rank], [ĐiểmTop1]
-              </span>
-            </div>
-            <textarea
-              rows={2}
-              value={
-                config.lessonRankingTtsTemplate ??
-                'Top 1 bảng xếp hạng là bạn [Top1Rank] với [ĐiểmTop1] điểm, chúng ta đến với câu hỏi tiếp theo nhé!'
-              }
-              onChange={(e) =>
-                onUpdateConfig({ lessonRankingTtsTemplate: e.target.value })
-              }
-              className="w-full px-2 py-1.5 rounded bg-stone-900 border border-stone-700 text-[11px] text-stone-100 focus:outline-none focus:border-purple-400 resize-y"
-            />
-          </div>
-
-          <div className="flex items-center justify-between gap-2 text-[10px] bg-stone-900/70 px-2 py-1 rounded border border-stone-800/80">
-            <span className="text-stone-400">Thời gian luồng:</span>
-            <span className="font-mono font-bold text-emerald-300">
-              🔒 Tự động: Hiện 6 top đầu 3s, mỗi 2s lật trang • Nói xong kết thúc câu hỏi
-            </span>
-          </div>
-        </div>
+          );
+        })()}
 
         {/* LUỒNG PHẠT ĐẶC BIỆT (SAU LUỒNG 6): KHI CÓ AI TẶNG QUÀ 5 / 10 / 10+ */}
         <div className="p-2.5 rounded-lg bg-stone-950/90 border border-rose-500/40 space-y-2">

@@ -379,6 +379,13 @@ class LiveSyncService {
               username: extractUsername(raw),
               avatarUrl: extractAvatar(raw) || extractAvatar(raw.raw),
               comment: extractComment(raw),
+              giftName:
+                raw.giftName ||
+                raw.giftDetails?.giftName ||
+                raw.gift?.name ||
+                raw.extendedGiftInfo?.name ||
+                raw.raw?.giftName ||
+                'Lễ vật',
               likeCount: Math.max(
                 1,
                 Number(raw.likeCount ?? raw.count ?? raw.unmergedLikeCount ?? 1)
@@ -411,7 +418,11 @@ class LiveSyncService {
                 avatarUrl,
                 comment: extractComment(raw),
                 giftName:
-                  d.giftName || d.giftDetails?.giftName || d.gift?.name || 'Lễ vật',
+                  d.giftName ||
+                  d.giftDetails?.giftName ||
+                  d.gift?.name ||
+                  d.extendedGiftInfo?.name ||
+                  'Lễ vật',
                 coins: Math.max(1, Number(diamondCount) * Number(repeatCount)),
                 likeCount: Math.max(
                   1,

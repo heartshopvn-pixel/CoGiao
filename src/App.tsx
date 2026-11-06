@@ -85,6 +85,7 @@ export default function App() {
         goldenLotusRainUntil={engine.goldenLotusRainUntil}
         moneyRainUntil={engine.moneyRainUntil}
         runningPigs={engine.runningPigs}
+        roamingCats={engine.roamingCats}
         flyingFlowers={engine.flyingFlowers}
         simpleExplosions={engine.simpleExplosions}
         zombieEventState={engine.zombieEventState}

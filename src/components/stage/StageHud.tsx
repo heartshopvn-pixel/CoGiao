@@ -164,44 +164,74 @@ function getGuideTaskColorClasses(item: GuideTaskItem): {
       ? 'amber'
       : item.modelType === 'special_tray'
       ? 'yellow'
-      : 'stone');
+      : 'amber');
 
   switch (theme) {
-    case 'pink':
+    case 'yellow':
       return {
-        borderRgb: '244, 114, 182',
-        labelClass: 'text-pink-300',
-        descClass: 'text-stone-100',
+        borderRgb: '253, 224, 71',
+        labelClass: 'text-yellow-300',
+        descClass: 'text-yellow-200 font-semibold',
       };
     case 'amber':
       return {
         borderRgb: '251, 191, 36',
         labelClass: 'text-amber-300',
-        descClass: 'text-amber-100',
+        descClass: 'text-amber-200 font-semibold',
       };
-    case 'yellow':
+    case 'orange':
       return {
-        borderRgb: '253, 224, 71',
-        labelClass: 'text-yellow-300',
-        descClass: 'text-yellow-100 font-semibold',
+        borderRgb: '251, 146, 60',
+        labelClass: 'text-orange-300',
+        descClass: 'text-orange-200 font-semibold',
       };
-    case 'emerald':
+    case 'rose':
       return {
-        borderRgb: '52, 211, 153',
-        labelClass: 'text-emerald-300',
-        descClass: 'text-emerald-200',
+        borderRgb: '251, 113, 133',
+        labelClass: 'text-rose-300',
+        descClass: 'text-rose-200 font-semibold',
+      };
+    case 'pink':
+      return {
+        borderRgb: '244, 114, 182',
+        labelClass: 'text-pink-300',
+        descClass: 'text-pink-200 font-semibold',
+      };
+    case 'fuchsia':
+      return {
+        borderRgb: '232, 121, 249',
+        labelClass: 'text-fuchsia-300',
+        descClass: 'text-fuchsia-200 font-semibold',
+      };
+    case 'violet':
+      return {
+        borderRgb: '167, 139, 250',
+        labelClass: 'text-violet-300',
+        descClass: 'text-violet-200 font-semibold',
       };
     case 'cyan':
       return {
         borderRgb: '34, 211, 238',
         labelClass: 'text-cyan-300',
-        descClass: 'text-cyan-100',
+        descClass: 'text-cyan-200 font-semibold',
+      };
+    case 'emerald':
+      return {
+        borderRgb: '52, 211, 153',
+        labelClass: 'text-emerald-300',
+        descClass: 'text-emerald-200 font-semibold',
+      };
+    case 'lime':
+      return {
+        borderRgb: '163, 230, 53',
+        labelClass: 'text-lime-300',
+        descClass: 'text-lime-200 font-semibold',
       };
     default:
       return {
-        borderRgb: '148, 163, 184',
-        labelClass: 'text-amber-200',
-        descClass: 'text-stone-200',
+        borderRgb: '251, 191, 36',
+        labelClass: 'text-amber-300',
+        descClass: 'text-amber-200 font-semibold',
       };
   }
 }
@@ -445,6 +475,12 @@ export const StageHud: React.FC<StageHudProps> = ({
     ENGLISH_QUIZ_QUESTIONS[qIdx % ENGLISH_QUIZ_QUESTIONS.length] ||
     ENGLISH_QUIZ_QUESTIONS[0];
   const quizLetters = quizItem.en.toUpperCase().split('');
+  // Gợi ý thêm 1 ô ngẫu nhiên (ngoài chữ đầu tiên) ở 5s cuối nếu từ dài hơn 5 ký tự
+  const extraHintIndex = React.useMemo(() => {
+    const len = quizLetters.length;
+    if (len <= 5) return -1;
+    return 1 + Math.floor(Math.random() * (len - 1));
+  }, [quizItem.id, qIdx, quizLetters.length]);
   const isBoardRunning = Boolean(classBoardState?.isRunning);
   const boardPhase = classBoardState?.phase || 'asking';
   const totalDurMs = Math.max(1000, classBoardState?.totalDurationMs || 15000);
@@ -547,23 +583,8 @@ export const StageHud: React.FC<StageHudProps> = ({
     return Array.from(map.values()).sort((a, b) => b.points - a.points);
   }, [lotusDonors, pilgrims, classWinners]);
 
-  // Tính trang 6 bạn của Bảng Xếp Hạng Trong Lớp (Luồng 6):
-  // - 3s đầu (0s -> 3s): hiển thị 6 top đầu (Rank 1 - Rank 6)
-  // - Sau 3s: cứ mỗi 2s load tiếp 6 top tiếp theo (Rank 7-12, Rank 13-18...) cho đến khi kết thúc luồng
-  const totalScorePageCount = Math.max(
-    1,
-    Math.ceil(combinedTotalRankings.length / 6)
-  );
-  const rankingElapsedMs = isRankingBoardPhase
-    ? elapsedPhaseMs
-    : Math.max(0, elapsedPhaseMs - 4000);
-  const rawScorePageIdx =
-    rankingElapsedMs < 3000
-      ? 0
-      : 1 + Math.floor((rankingElapsedMs - 3000) / 2000);
-  const activeScorePageIdx =
-    totalScorePageCount > 1 ? rawScorePageIdx % totalScorePageCount : 0;
-  const scorePageStartRank = activeScorePageIdx * 6;
+  // Ở Luồng 6 (Bảng Xếp Hạng Trong Lớp): giữ cố định danh sách 10 bạn đầu tiên (Rank 1 - Rank 10) kéo dài cho đến hết luồng, không load thêm trang khác
+  const scorePageStartRank = 0;
 
   const renderResultWinnerCard = (
     w: ClassBoardQuizWinner | undefined,
@@ -571,25 +592,28 @@ export const StageHud: React.FC<StageHudProps> = ({
     isClassCol: boolean
   ) => {
     const rankNum = rankIdx + 1;
-    const defaultPts = rankNum === 1 ? 10 : rankNum === 2 ? 8 : 7;
+    const defaultPts =
+      rankNum === 1 ? 10 : rankNum === 2 ? 8 : rankNum === 3 ? 7 : 6;
     const pts = w?.points || defaultPts;
     const rankBadgeColors =
       rankNum === 1
         ? 'bg-yellow-400 text-stone-950 border-yellow-200'
         : rankNum === 2
         ? 'bg-slate-200 text-stone-950 border-white'
-        : 'bg-amber-600 text-white border-amber-300';
+        : rankNum === 3
+        ? 'bg-amber-600 text-white border-amber-300'
+        : 'bg-sky-400 text-stone-950 border-sky-200';
 
     if (!w) {
       return (
         <div
           key={`empty-${isClassCol ? 'cls' : 'out'}-${rankNum}`}
-          className="px-2 py-1 rounded-md bg-slate-950/45 border border-white/15 flex items-center justify-between gap-1.5 opacity-60"
+          className="px-2 py-0.5 rounded-md bg-slate-950/45 border border-white/15 flex items-center justify-between gap-1.5 opacity-60"
           style={{ fontSize: `${Math.max(8, safeClassBoardFontSize - 3)}px` }}
         >
           <div className="flex items-center gap-1.5 min-w-0">
             <span
-              className={`w-4 h-4 rounded-full text-[8.5px] font-black flex items-center justify-center border shrink-0 ${rankBadgeColors}`}
+              className={`w-3.5 h-3.5 rounded-full text-[8px] font-black flex items-center justify-center border shrink-0 ${rankBadgeColors}`}
             >
               {rankNum}
             </span>
@@ -605,12 +629,12 @@ export const StageHud: React.FC<StageHudProps> = ({
     return (
       <div
         key={`win-${isClassCol ? 'cls' : 'out'}-${rankNum}-${w.username}`}
-        className={`px-2 py-1 rounded-md border flex items-center justify-between gap-1.5 ${
+        className={`px-2 py-0.5 rounded-md border flex items-center justify-between gap-1.5 ${
           rankNum === 1
             ? 'bg-amber-500/30 border-yellow-300 top1-card-blink'
             : 'bg-slate-950/65 border-emerald-300/45'
         }`}
-        style={{ fontSize: `${Math.max(8.5, safeClassBoardFontSize - 2.5)}px` }}
+        style={{ fontSize: `${Math.max(8, safeClassBoardFontSize - 3)}px` }}
       >
         <div className="flex items-center gap-1.5 min-w-0">
           <div className="relative shrink-0">
@@ -618,11 +642,11 @@ export const StageHud: React.FC<StageHudProps> = ({
               <img
                 src={w.avatarUrl}
                 alt=""
-                className="w-4.5 h-4.5 rounded-full object-cover border border-yellow-300"
+                className="w-4 h-4 rounded-full object-cover border border-yellow-300"
               />
             ) : (
               <span
-                className="w-4.5 h-4.5 rounded-full flex items-center justify-center text-[8.5px] font-black text-white border border-white/60"
+                className="w-4 h-4 rounded-full flex items-center justify-center text-[8px] font-black text-white border border-white/60"
                 style={{ backgroundColor: w.avatarColor || '#059669' }}
               >
                 {(w.username || 'H').charAt(0).toUpperCase()}
@@ -640,11 +664,11 @@ export const StageHud: React.FC<StageHudProps> = ({
         </div>
 
         <div className="flex items-center gap-1 shrink-0 font-mono">
-          <span className="px-1 py-0.2 rounded bg-emerald-500/35 border border-emerald-300/70 text-emerald-200 font-black text-[9px]">
+          <span className="px-1 py-0.1 rounded bg-emerald-500/35 border border-emerald-300/70 text-emerald-200 font-black text-[8.5px]">
             +{pts}đ
           </span>
-          <span className="text-amber-200 text-[8.5px] font-semibold">
-            ({Number(w.elapsedSec || 0).toFixed(1)} giây)
+          <span className="text-amber-200 text-[8px] font-semibold">
+            ({Number(w.elapsedSec || 0).toFixed(1)}s)
           </span>
         </div>
       </div>
@@ -655,42 +679,41 @@ export const StageHud: React.FC<StageHudProps> = ({
     const rankNum = scorePageStartRank + slotIdx + 1;
     const entry = combinedTotalRankings[scorePageStartRank + slotIdx];
 
-    // Màu sắc & hiệu ứng nhấp nháy cho Top 1 (Vàng), Top 2 (Tím), Top 3 (Xanh lá), còn lại thẻ Rank màu trắng
+    // Chỉ highlight duy nhất bạn Top 1
     const cardToneClass =
       rankNum === 1
         ? 'bg-amber-500/30 border-yellow-300 rank-top1-blink'
-        : rankNum === 2
-        ? 'bg-purple-600/30 border-purple-300 rank-top2-blink'
-        : rankNum === 3
-        ? 'bg-emerald-600/30 border-emerald-300 rank-top3-blink'
         : 'bg-slate-950/65 border-white/25';
 
     const rankBadgeClass =
       rankNum === 1
         ? 'bg-yellow-300 text-stone-950 border-yellow-100'
-        : rankNum === 2
-        ? 'bg-purple-400 text-stone-950 border-purple-100'
-        : rankNum === 3
-        ? 'bg-emerald-400 text-stone-950 border-emerald-100'
         : 'bg-white text-slate-950 border-slate-200';
+
+    const scoreFontSize = Math.max(10.5, safeClassBoardFontSize - 1);
 
     if (!entry) {
       return (
         <div
           key={`total-empty-rank-${rankNum}`}
-          className="px-2 py-1 rounded-md bg-slate-950/40 border border-white/15 flex items-center justify-between gap-1.5 opacity-55"
+          className="px-2 py-[1.5px] rounded-md bg-slate-950/40 border border-white/15 flex items-center justify-between gap-1.5 opacity-55"
           style={{ fontSize: `${Math.max(8, safeClassBoardFontSize - 3)}px` }}
         >
           <div className="flex items-center gap-1.5 min-w-0">
-            <span className="w-4.5 h-4.5 rounded-full bg-slate-800 border border-white/20 flex items-center justify-center text-[8px] text-stone-400 shrink-0">
+            <span className="w-3.5 h-3.5 rounded-full bg-slate-800 border border-white/20 flex items-center justify-center text-[7.5px] text-stone-400 shrink-0">
               -
             </span>
             <span className="text-stone-400 italic truncate">Chưa có</span>
           </div>
-          <div className="flex items-center gap-1 shrink-0">
-            <span className="font-mono text-stone-400 text-[8.5px]">0đ</span>
+          <div className="flex items-center gap-1.5 shrink-0">
             <span
-              className={`px-1.5 py-0.2 rounded text-[8px] font-black border ${rankBadgeClass}`}
+              className="font-mono font-bold text-stone-400 leading-none"
+              style={{ fontSize: `${scoreFontSize}px` }}
+            >
+              0
+            </span>
+            <span
+              className={`px-1.5 py-0.2 rounded text-[7.5px] font-black border ${rankBadgeClass}`}
             >
               Rank {rankNum}
             </span>
@@ -702,7 +725,7 @@ export const StageHud: React.FC<StageHudProps> = ({
     return (
       <div
         key={`total-rank-${rankNum}-${entry.username}`}
-        className={`px-2 py-1 rounded-md border flex items-center justify-between gap-1.5 ${cardToneClass}`}
+        className={`px-2 py-[1.5px] rounded-md border flex items-center justify-between gap-1.5 ${cardToneClass}`}
         style={{ fontSize: `${Math.max(8.5, safeClassBoardFontSize - 2.5)}px` }}
       >
         <div className="flex items-center gap-1.5 min-w-0">
@@ -710,11 +733,11 @@ export const StageHud: React.FC<StageHudProps> = ({
             <img
               src={entry.avatarUrl}
               alt=""
-              className="w-4.5 h-4.5 rounded-full object-cover border border-white/80 shrink-0"
+              className="w-3.5 h-3.5 rounded-full object-cover border border-white/80 shrink-0"
             />
           ) : (
             <span
-              className="w-4.5 h-4.5 rounded-full flex items-center justify-center text-[8.5px] font-black text-white border border-white/70 shrink-0"
+              className="w-3.5 h-3.5 rounded-full flex items-center justify-center text-[7.5px] font-black text-white border border-white/70 shrink-0"
               style={{ backgroundColor: entry.avatarColor || '#059669' }}
             >
               {(entry.username || 'H').charAt(0).toUpperCase()}
@@ -725,12 +748,15 @@ export const StageHud: React.FC<StageHudProps> = ({
           </span>
         </div>
 
-        <div className="flex items-center gap-1 shrink-0">
-          <span className="font-mono font-black text-yellow-200 text-[9.5px]">
-            {entry.points}đ
+        <div className="flex items-center gap-1.5 shrink-0">
+          <span
+            className="font-mono font-black text-yellow-200 leading-none tabular-nums"
+            style={{ fontSize: `${scoreFontSize}px` }}
+          >
+            {entry.points}
           </span>
           <span
-            className={`px-1.5 py-0.2 rounded text-[8px] font-black border shrink-0 ${rankBadgeClass}`}
+            className={`px-1.5 py-0.2 rounded text-[7.5px] font-black border shrink-0 ${rankBadgeClass}`}
           >
             Rank {rankNum}
           </span>
@@ -761,6 +787,17 @@ export const StageHud: React.FC<StageHudProps> = ({
     zombieEventState?.isActive && zombieEventState.phase !== 'idle'
   );
 
+  // Key định danh luồng hiển thị bên trong Bảng Lớp: chỉ kích hoạt fade nhẹ (0 -> 1 trong 0.25s) cho phần chữ/nội dung bên trong khi chuyển luồng, giữ nguyên khung nền bảng đen đứng yên
+  const boardPhaseFadeKey = zombieEventState?.isActive
+    ? zombieEventState.phase === 'z_flow_1_intro'
+      ? 'zombie_intro'
+      : zombieEventState.phase === 'z_flow_6_celebration'
+      ? 'zombie_celebration'
+      : 'zombie_combat'
+    : activeEngine === 'english_quiz'
+    ? `quiz_${classBoardState?.phase || 'asking'}_${qIdx}`
+    : `engine_${activeEngine}`;
+
   return (
     <div className="absolute inset-0 pointer-events-none overflow-hidden">
       {/* 0. BẢNG LỚP LỚN TƯƠNG TÁC CHÍNH (Nằm trên bảng đen thực tế, z-20 để Cô Giáo z-25 ưu tiên nổi trên bảng lớp) */}
@@ -778,6 +815,10 @@ export const StageHud: React.FC<StageHudProps> = ({
             ...classBoardSurfaceStyle,
           }}
         >
+          <div
+            key={boardPhaseFadeKey}
+            className="w-full h-full flex flex-col justify-between class-board-phase-fade"
+          >
           {zombieEventState?.isActive ? (
             zombieEventState.phase === 'z_flow_1_intro' ? (
               /* SỰ KIỆN ZOMBIE - LUỒNG 1: Cảnh báo đỏ sáng font pixel trên bảng lớp */
@@ -1098,25 +1139,25 @@ export const StageHud: React.FC<StageHudProps> = ({
                 <div className="flex items-center gap-1.5 shrink-0">
                   <span className="px-1.5 py-0.5 rounded bg-emerald-500/25 border border-emerald-300/60 text-emerald-200 font-bold text-[9px]">
                     {showTotalScoreBoard
-                      ? `Rank ${scorePageStartRank + 1}-${scorePageStartRank + 6}`
+                      ? 'Rank 1-10'
                       : `Đúng: ${boardWinners.length} bạn`}
                   </span>
                 </div>
               </div>
 
-              {/* Khu vực giữa: Luồng 5 là 2 cột Học ké / Trong lớp; Luồng 6 là Bảng Xếp Hạng Trong Lớp 6 thẻ */}
+              {/* Khu vực giữa: Luồng 5 là 2 cột Học ké / Trong lớp (Top 1-4); Luồng 6 là Bảng Xếp Hạng Trong Lớp 10 thẻ cố định (5 hàng) */}
               {showTotalScoreBoard ? (
-                <div className="rounded-lg bg-slate-950/45 border border-amber-300/40 px-2 py-1.5 my-auto flex-1 min-h-0 flex flex-col justify-center">
-                  <div className="grid grid-cols-2 gap-1.5 my-auto">
-                    {[0, 1, 2, 3, 4, 5].map((slotIdx) =>
+                <div className="rounded-lg bg-slate-950/45 border border-amber-300/40 px-2 py-1 my-auto flex-1 min-h-0 flex flex-col justify-center">
+                  <div className="grid grid-cols-2 gap-1 my-auto">
+                    {[0, 1, 2, 3, 4, 5, 6, 7, 8, 9].map((slotIdx) =>
                       renderTotalScoreRankCard(slotIdx)
                     )}
                   </div>
                 </div>
               ) : (
                 <div className="grid grid-cols-2 gap-2 my-auto flex-1 min-h-0 items-stretch">
-                  {/* Cột Trái: Học ké trả lời đúng */}
-                  <div className="rounded-lg bg-slate-950/45 border border-cyan-300/35 px-2 py-1.5 flex flex-col justify-between gap-1">
+                  {/* Cột Trái: Học ké trả lời đúng (Top 1-4) */}
+                  <div className="rounded-lg bg-slate-950/45 border border-cyan-300/35 px-2 py-1 flex flex-col justify-between gap-0.5">
                     <div
                       className="font-extrabold text-cyan-200 flex items-center justify-between gap-1 pb-0.5 border-b border-white/15"
                       style={{ fontSize: `${Math.max(8.5, safeClassBoardFontSize - 2.5)}px` }}
@@ -1125,18 +1166,18 @@ export const StageHud: React.FC<StageHudProps> = ({
                         Học ké đúng: <b className="text-yellow-300">{outsideWinners.length}</b>
                       </span>
                       <span className="text-[8px] font-mono text-cyan-300/90 shrink-0">
-                        Top 1-3
+                        Top 1-4
                       </span>
                     </div>
-                    <div className="space-y-1 my-auto">
-                      {[0, 1, 2].map((idx) =>
+                    <div className="space-y-0.5 my-auto">
+                      {[0, 1, 2, 3].map((idx) =>
                         renderResultWinnerCard(outsideWinners[idx], idx, false)
                       )}
                     </div>
                   </div>
 
-                  {/* Cột Phải: Top 1, 2, 3 trong lớp trả lời đúng */}
-                  <div className="rounded-lg bg-slate-950/45 border border-amber-300/45 px-2 py-1.5 flex flex-col justify-between gap-1">
+                  {/* Cột Phải: Top 1, 2, 3, 4 trong lớp trả lời đúng */}
+                  <div className="rounded-lg bg-slate-950/45 border border-amber-300/45 px-2 py-1 flex flex-col justify-between gap-0.5">
                     <div
                       className="font-extrabold text-amber-200 flex items-center justify-between gap-1 pb-0.5 border-b border-white/15"
                       style={{ fontSize: `${Math.max(8.5, safeClassBoardFontSize - 2.5)}px` }}
@@ -1145,11 +1186,11 @@ export const StageHud: React.FC<StageHudProps> = ({
                         Trong lớp đúng: <b className="text-yellow-300">{classWinners.length}/{currentPilgrimCount}</b>
                       </span>
                       <span className="text-[8px] font-mono text-yellow-300 shrink-0">
-                        Top 1-3
+                        Top 1-4
                       </span>
                     </div>
-                    <div className="space-y-1 my-auto">
-                      {[0, 1, 2].map((idx) =>
+                    <div className="space-y-0.5 my-auto">
+                      {[0, 1, 2, 3].map((idx) =>
                         renderResultWinnerCard(classWinners[idx], idx, true)
                       )}
                     </div>
@@ -1284,19 +1325,19 @@ export const StageHud: React.FC<StageHudProps> = ({
                   <span className="font-extrabold tracking-wide text-amber-200 uppercase truncate">
                     Tiết Tiếng Anh • Câu #{qIdx + 1}/{totalQuizCount}
                   </span>
-                  {Boolean(quizItem.luckyStars) && (
+                  {Boolean(quizItem.luckyStars && quizItem.luckyStars >= 1) && (
                     <span
-                      className={`px-1.5 py-0.5 rounded font-mono font-black text-[9.5px] leading-none border flex items-center gap-0.5 shrink-0 ${
+                      className={`px-1.5 py-0.5 rounded font-mono font-black text-[9px] leading-none border flex items-center gap-0.5 shrink-0 ${
                         quizItem.luckyStars === 3
-                          ? 'bg-gradient-to-r from-amber-500 via-yellow-300 to-rose-500 text-slate-950 border-yellow-200 shadow-[0_0_10px_rgba(250,204,21,0.9)] animate-pulse'
+                          ? 'bg-gradient-to-r from-amber-500 via-yellow-300 to-rose-500 text-slate-950 border-yellow-200 shadow-[0_0_8px_rgba(250,204,21,0.85)]'
                           : quizItem.luckyStars === 2
-                          ? 'bg-gradient-to-r from-amber-500 to-orange-500 text-slate-950 border-amber-200 shadow-[0_0_8px_rgba(251,191,36,0.8)]'
-                          : 'bg-emerald-500/30 text-emerald-200 border-emerald-400'
+                          ? 'bg-gradient-to-r from-amber-500 to-orange-500 text-slate-950 border-amber-200'
+                          : 'bg-amber-500/25 text-amber-200 border-amber-400/80'
                       }`}
-                      title={`Hệ số điểm: x${quizItem.luckyStars}`}
+                      title={`${quizItem.luckyStars} sao may mắn, x${(quizItem.luckyStars || 0) + 1} điểm`}
                     >
-                      <span>{quizItem.luckyStars === 3 ? '⭐⭐⭐' : quizItem.luckyStars === 2 ? '⭐⭐' : '⭐'}</span>
-                      <span>x{quizItem.luckyStars}</span>
+                      <span>{'⭐'.repeat(quizItem.luckyStars || 1)}</span>
+                      <span>x{(quizItem.luckyStars || 0) + 1}</span>
                     </span>
                   )}
                 </div>
@@ -1325,21 +1366,8 @@ export const StageHud: React.FC<StageHudProps> = ({
                 </div>
               </div>
 
-              {/* Nội dung trung tâm: Câu hỏi hoặc "Đáp án là:" + Các ô chữ cái tương ứng */}
-              <div className="my-auto flex flex-col items-center justify-center gap-2 py-1">
-                {/* HIỆU ỨNG SAO MAY MẮN TRÊN BẢNG LỚP */}
-                {Boolean(quizItem.luckyStars && quizItem.luckyStars >= 2) && (
-                  <div className="flex items-center justify-center gap-1.5 px-3 py-1 rounded-full bg-gradient-to-r from-amber-500/25 via-yellow-400/35 to-amber-500/25 border-2 border-yellow-300/90 shadow-[0_0_16px_rgba(250,204,21,0.85)] animate-pulse">
-                    <Sparkles className="w-3.5 h-3.5 text-yellow-300 animate-spin" />
-                    <span className="font-black text-[12px] uppercase tracking-wider text-yellow-200 drop-shadow-[0_2px_4px_rgba(0,0,0,0.85)]">
-                      {quizItem.luckyStars === 3
-                        ? '⭐⭐⭐ SAO MAY MẮN • NHÂN 3 ĐIỂM (x3) ⭐⭐⭐'
-                        : '⭐⭐ SAO MAY MẮN • NHÂN 2 ĐIỂM (x2) ⭐⭐'}
-                    </span>
-                    <Sparkles className="w-3.5 h-3.5 text-yellow-300 animate-spin" />
-                  </div>
-                )}
-
+              {/* Nội dung trung tâm: Câu hỏi hoặc "Đáp án là:" + Các ô chữ cái tương ứng + Dòng sao may mắn bên dưới */}
+              <div className="my-auto flex flex-col items-center justify-center gap-1.5 py-1">
                 <div
                   className="text-center font-extrabold text-white leading-snug tracking-wide"
                   style={{ fontSize: `${safeClassBoardFontSize + 2}px` }}
@@ -1370,12 +1398,10 @@ export const StageHud: React.FC<StageHudProps> = ({
                     } else if (classBoardLetterMode === 'blank') {
                       showChar = false;
                     } else {
-                      // Chế độ 'hint': mở chữ cái đầu tiên, và mở thêm gợi ý khi thời gian trôi qua
-                      if (idx === 0) showChar = true;
-                      if (len >= 5 && timeRatio < 0.65 && idx === Math.floor(len / 2)) {
+                      // Chế độ 'hint': chỉ gợi ý duy nhất chữ đầu tiên; nếu ký tự dài hơn 5, gợi ý thêm 1 ô ngẫu nhiên ở 5s cuối
+                      if (idx === 0) {
                         showChar = true;
-                      }
-                      if (len >= 6 && timeRatio < 0.35 && idx === len - 1) {
+                      } else if (len > 5 && remSec <= 5 && idx === extraHintIndex) {
                         showChar = true;
                       }
                     }
@@ -1412,6 +1438,18 @@ export const StageHud: React.FC<StageHudProps> = ({
                     );
                   })}
                 </div>
+
+                {/* DÒNG SAO MAY MẮN MÀU VÀNG: Dời xuống phía dưới ô chữ và cách ra một khoảng trống nhỏ */}
+                {Boolean(quizItem.luckyStars && quizItem.luckyStars >= 1) && (
+                  <div className="mt-1.5 inline-flex items-center justify-center gap-1 px-2.5 py-0.5 rounded-full bg-gradient-to-r from-amber-500/25 via-yellow-400/30 to-amber-500/25 border border-yellow-300/90 shadow-[0_0_12px_rgba(250,204,21,0.65)]">
+                    <span className="text-[10.5px] leading-none shrink-0">
+                      {'⭐'.repeat(quizItem.luckyStars || 1)}
+                    </span>
+                    <span className="font-extrabold text-[10.5px] tracking-wide text-yellow-200 drop-shadow-[0_1px_3px_rgba(0,0,0,0.85)]">
+                      {`${quizItem.luckyStars} sao may mắn, x${(quizItem.luckyStars || 0) + 1} điểm`}
+                    </span>
+                  </div>
+                )}
               </div>
 
               {/* Thanh thời gian đếm ngược + Danh sách người chơi comment đúng */}
@@ -1493,6 +1531,7 @@ export const StageHud: React.FC<StageHudProps> = ({
               </div>
             </div>
           )}
+          </div>
 
           {editLayoutMode && (
             <>
@@ -1771,7 +1810,6 @@ export const StageHud: React.FC<StageHudProps> = ({
             }}
           >
             <div className="flex items-center gap-1 min-w-0">
-              <ListOrdered className="w-3.5 h-3.5 text-cyan-300 shrink-0" />
               <span className="font-extrabold tracking-wide text-cyan-200 truncate">
                 {waitingQueueTitle || 'Hàng Chờ Vào Lớp'}
               </span>
@@ -1886,80 +1924,6 @@ export const StageHud: React.FC<StageHudProps> = ({
               />
               <span className="absolute -top-5 left-0 px-1.5 py-0.5 rounded bg-amber-400 text-stone-950 text-[9px] font-bold flex items-center gap-0.5 whitespace-nowrap shadow">
                 <Move className="w-2.5 h-2.5" /> {noticeBoardTitle || 'Bảng tin'} ({safeNoticeBoardBox.width}×{safeNoticeBoardBox.height})
-              </span>
-            </>
-          )}
-        </div>
-      )}
-
-      {/* 5. BẢNG HOA ĐIỂM 10 (Bảng xếp hạng điểm thi đua học sinh xuất sắc — Ẩn trong khi sự kiện xảy ra, kết thúc hiện lên lại, hỗ trợ chạy theo chu kỳ) */}
-      {showLotusLeaderboardBox && !isZombieEventActive && (
-        <div
-          onMouseDown={(e) => editLayoutMode && onStartDragHudBox('lotusLeaderboardBox', e)}
-          onTouchStart={(e) => editLayoutMode && onStartDragHudBox('lotusLeaderboardBox', e)}
-          className={`absolute z-30 rounded-lg border px-2 py-1.5 flex flex-col justify-between ${dragringClass}`}
-          style={{
-            left: `${safeLotusLeaderboardBox.x}px`,
-            top: `${safeLotusLeaderboardBox.y}px`,
-            width: `${safeLotusLeaderboardBox.width}px`,
-            height: `${safeLotusLeaderboardBox.height}px`,
-            ...buildBoxSurfaceStyle(opLotusLeaderboard),
-            ...lotusLeaderboardCycleStyle,
-          }}
-        >
-          <div
-            className="text-center pb-0.5 mb-1 shrink-0"
-            style={{
-              borderBottom:
-                opLotusLeaderboard > 0.05
-                  ? `1px solid rgba(245, 158, 11, ${(0.3 * opLotusLeaderboard).toFixed(2)})`
-                  : '1px solid transparent',
-            }}
-          >
-            <div
-              className="font-extrabold tracking-wide text-amber-300 truncate flex items-center justify-center gap-1"
-              style={{ fontSize: `${safeLotusLeaderboardFontSize}px` }}
-            >
-              <Flower10BadgeIcon className="w-3.5 h-3.5" />
-              <span className="truncate">
-                {lotusLeaderboardTitle || 'Bảng Hoa Điểm 10'}
-              </span>
-            </div>
-          </div>
-          <div
-            className="space-y-0.5 flex-1 flex flex-col justify-start overflow-y-auto"
-            style={{ fontSize: `${Math.max(7, safeLotusLeaderboardFontSize - 0.5)}px` }}
-          >
-            {topLotusDonors.length > 0 ? (
-              topLotusDonors.map((d, idx) => (
-                <div
-                  key={`lotus-${d.username}-${idx}`}
-                  className="flex items-center justify-between text-stone-100 gap-1 leading-tight"
-                >
-                  <span className="truncate">
-                    <b className="text-amber-300 font-mono mr-0.5">{idx + 1}.</b>
-                    {d.username}
-                  </span>
-                  <span className="font-bold font-mono text-pink-300 tabular-nums shrink-0">
-                    {d.coins.toLocaleString('vi-VN')}
-                  </span>
-                </div>
-              ))
-            ) : (
-              <div className="my-auto text-center text-stone-400 italic leading-tight">
-                Chưa có học sinh ghi danh
-              </div>
-            )}
-          </div>
-
-          {editLayoutMode && (
-            <>
-              <CornerResizeHandles
-                boxKey="lotusLeaderboardBox"
-                onStartResizeHudBox={onStartResizeHudBox}
-              />
-              <span className="absolute -top-5 right-0 px-1.5 py-0.5 rounded bg-amber-400 text-stone-950 text-[9px] font-bold flex items-center gap-0.5 whitespace-nowrap shadow">
-                <Move className="w-2.5 h-2.5" /> {lotusLeaderboardTitle || 'Bảng Hoa Điểm 10'} ({safeLotusLeaderboardBox.width}×{safeLotusLeaderboardBox.height})
               </span>
             </>
           )}

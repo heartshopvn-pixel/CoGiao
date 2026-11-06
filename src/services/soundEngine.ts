@@ -919,7 +919,14 @@ class TempleSoundService {
     const cfg = config || this.latestConfig;
     if (!forcePlay && cfg && cfg.giftSoundEnabled === false) return;
 
-    const volume = Math.max(0.08, Math.min(1, cfg?.ttsVolume ?? 1.0));
+    const masterVol = Math.max(0, Math.min(1, cfg?.giftSoundVolume ?? 1.0));
+    const itemVol = Math.max(
+      0,
+      Math.min(1, cfg?.giftSoundVolumes?.[giftId] ?? 1.0)
+    );
+    const volume = masterVol * itemVol;
+    if (volume <= 0.005) return;
+
     const customMp3 = cfg?.giftSoundMp3Urls?.[giftId];
     if (customMp3) {
       try {
