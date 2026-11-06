@@ -195,6 +195,8 @@ export interface EnglishQuizItem {
   vi: string;
   en: string;
   phonetic?: string;
+  luckyStars?: 1 | 2 | 3;
+  deckName?: string;
 }
 
 export interface ClassBoardQuizWinner {
@@ -438,6 +440,17 @@ export interface GameConfig {
   lessonPunishmentSingleTtsTemplate?: string;
   lessonPunishmentMultiTtsTemplate?: string;
   customQuizQuestions?: EnglishQuizItem[];
+  quizDecks?: Array<{ id: string; name: string; questions: EnglishQuizItem[] }>;
+  activeQuizDeckId?: string;
+  quizQueueLimitDisplay?: number;
+  shuffleBeforeEnqueue?: boolean;
+  luckyStarRatio1?: number; // % câu hỏi 1 sao (x1 điểm)
+  luckyStarRatio2?: number; // % câu hỏi 2 sao (x2 điểm)
+  luckyStarRatio3?: number; // % câu hỏi 3 sao (x3 điểm)
+
+  // Tốc độ di chuyển của học sinh (sắp xếp lớp vs lên tặng hoa Thầy/Cô)
+  studentSeatingSpeed?: number; // Tốc độ di chuyển vào lớp / xếp chỗ ngồi (default: 110)
+  studentGiftSpeed?: number; // Tốc độ di chuyển lên tặng hoa cho Thầy và Cô (default: 185)
 
   // Bong bóng lời giảng của Giáo viên
   abbotBubbleEnabled: boolean;
@@ -500,6 +513,7 @@ export interface GameConfig {
   chatBubbleMaxHeight?: number;
   chatBubbleFontSize?: number;
   chatBubbleOffsetY?: number;
+  chatBubbleOffsetX?: number;
   grandEventTarget: number;
   maxFlyingLotuses: number;
   spawnPoint: Point2D;

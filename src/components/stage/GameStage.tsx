@@ -1222,6 +1222,7 @@ export const GameStage: React.FC<GameStageProps> = ({
                 chatBubbleMaxHeight={config.chatBubbleMaxHeight ?? 110}
                 chatBubbleFontSize={config.chatBubbleFontSize ?? 11}
                 chatBubbleOffsetY={config.chatBubbleOffsetY ?? 0}
+                chatBubbleOffsetX={config.chatBubbleOffsetX ?? 24}
                 isLeftSeatmate={false}
                 isSpeakingBubble={speakingPilgrim?.id === p.id}
                 giftModelScales={config.giftModelScales}
@@ -1246,6 +1247,7 @@ export const GameStage: React.FC<GameStageProps> = ({
                 chatBubbleMaxHeight={config.chatBubbleMaxHeight ?? 110}
                 chatBubbleFontSize={config.chatBubbleFontSize ?? 11}
                 chatBubbleOffsetY={config.chatBubbleOffsetY ?? 0}
+                chatBubbleOffsetX={config.chatBubbleOffsetX ?? 24}
                 isLeftSeatmate={false}
                 isSpeakingBubble={false}
                 giftModelScales={config.giftModelScales}
@@ -1274,6 +1276,7 @@ export const GameStage: React.FC<GameStageProps> = ({
                   chatBubbleMaxHeight={config.chatBubbleMaxHeight ?? 110}
                   chatBubbleFontSize={config.chatBubbleFontSize ?? 11}
                   chatBubbleOffsetY={config.chatBubbleOffsetY ?? 0}
+                  chatBubbleOffsetX={config.chatBubbleOffsetX ?? 24}
                   isLeftSeatmate={Boolean(
                     p.slotId && leftSeatIds.has(p.slotId)
                   )}

@@ -35,6 +35,7 @@ interface StudentSpriteProps {
   chatBubbleMaxHeight?: number;
   chatBubbleFontSize?: number;
   chatBubbleOffsetY?: number;
+  chatBubbleOffsetX?: number;
   isLeftSeatmate?: boolean;
   isSpeakingBubble?: boolean;
   giftModelScales?: GiftModelScalesConfig;
@@ -110,6 +111,7 @@ export const StudentSprite: React.FC<StudentSpriteProps> = ({
   chatBubbleMaxHeight = 110,
   chatBubbleFontSize = 11,
   chatBubbleOffsetY = 0,
+  chatBubbleOffsetX = 24,
   isLeftSeatmate = false,
   isSpeakingBubble = false,
   giftModelScales = DEFAULT_GIFT_MODEL_SCALES,
@@ -423,55 +425,68 @@ export const StudentSprite: React.FC<StudentSpriteProps> = ({
         </div>
       )}
 
-      {/* BONG BÓNG CHAT PHÁT BIỂU (Tự động đẩy lên theo đỉnh đầu + cho phép chỉnh giới hạn ký tự, rộng/cao tối đa, cỡ chữ và vị trí dọc) */}
-      {showChatBubble && (
-        <div
-          className="absolute left-0 pointer-events-none"
-          style={{
-            top: -headTopOffsetPx + (chatBubbleOffsetY || 0),
-            transform: `translate(-50%, -100%) scale(${(chatBubbleScale || 1).toFixed(2)})`,
-            transformOrigin: '50% 100%',
-            zIndex: 9999,
-          }}
-        >
+      {/* BONG BÓNG CHAT PHÁT BIỂU (Tự động nhận diện ghế ngồi: bên trái đẩy sang trái, bên phải đẩy sang phải để không đè lên nhau) */}
+      {showChatBubble && (() => {
+        const bubbleTranslateX = isSeated ? (isLeftSeatmate ? '-80%' : '-20%') : '-50%';
+        const bubbleOrigin = isSeated ? (isLeftSeatmate ? '80% 100%' : '20% 100%') : '50% 100%';
+        const tailLeftPercent = isSeated ? (isLeftSeatmate ? '80%' : '20%') : '50%';
+        const spreadPx = Number(chatBubbleOffsetX ?? 24);
+        const horizontalShiftPx = isSeated ? (isLeftSeatmate ? -spreadPx : spreadPx) : 0;
+
+        return (
           <div
+            className="absolute pointer-events-none"
             style={{
-              fontFamily: chatBubbleFontFamily,
-              fontSize: `${safeBubbleFontSize}px`,
-              maxWidth: `${safeBubbleMaxW}px`,
-              minWidth: `${Math.min(72, safeBubbleMaxW)}px`,
+              left: horizontalShiftPx,
+              top: -headTopOffsetPx + (chatBubbleOffsetY || 0),
+              transform: `translate(${bubbleTranslateX}, -100%) scale(${(chatBubbleScale || 1).toFixed(2)})`,
+              transformOrigin: bubbleOrigin,
+              zIndex: 9999,
             }}
-            className={`relative px-2.5 py-1.5 rounded-xl border font-semibold leading-snug text-center break-words transition-all duration-200 ${
-              isSpeakingBubble
-                ? 'bg-slate-950/95 text-pink-200 border-pink-400 shadow-[0_0_16px_rgba(244,114,182,0.85)] z-50 scale-105'
-                : pilgrim.isVip
-                ? 'bg-slate-950/92 text-amber-100 border-amber-400/80 shadow-lg'
-                : 'bg-slate-950/90 text-white border-sky-400/60 shadow-md'
-            }`}
           >
             <div
-              style={{ maxHeight: `${safeBubbleMaxH}px` }}
-              className="overflow-hidden break-words"
-            >
-              {isSpeakingBubble && (
-                <span className="inline-block mr-1 text-pink-300 font-extrabold">
-                  🔊
-                </span>
-              )}
-              <span>{displayPrayer}</span>
-            </div>
-            <div
-              className={`w-2 h-2 rotate-45 mx-auto -mb-2.5 mt-0.5 border-r border-b ${
+              style={{
+                fontFamily: chatBubbleFontFamily,
+                fontSize: `${safeBubbleFontSize}px`,
+                maxWidth: `${safeBubbleMaxW}px`,
+                minWidth: `${Math.min(72, safeBubbleMaxW)}px`,
+              }}
+              className={`relative px-2.5 py-1.5 rounded-xl border font-semibold leading-snug text-center break-words transition-all duration-200 ${
                 isSpeakingBubble
-                  ? 'bg-slate-950 border-pink-400'
+                  ? 'bg-slate-950/95 text-pink-200 border-pink-400 shadow-[0_0_16px_rgba(244,114,182,0.85)] z-50 scale-105'
                   : pilgrim.isVip
-                  ? 'bg-slate-950 border-amber-400/80'
-                  : 'bg-slate-950 border-sky-400/60'
+                  ? 'bg-slate-950/92 text-amber-100 border-amber-400/80 shadow-lg'
+                  : 'bg-slate-950/90 text-white border-sky-400/60 shadow-md'
               }`}
-            />
+            >
+              <div
+                style={{ maxHeight: `${safeBubbleMaxH}px` }}
+                className="overflow-hidden break-words"
+              >
+                {isSpeakingBubble && (
+                  <span className="inline-block mr-1 text-pink-300 font-extrabold">
+                    🔊
+                  </span>
+                )}
+                <span>{displayPrayer}</span>
+              </div>
+              <div
+                className={`w-2 h-2 absolute -bottom-1 border-r border-b ${
+                  isSpeakingBubble
+                    ? 'bg-slate-950 border-pink-400'
+                    : pilgrim.isVip
+                    ? 'bg-slate-950 border-amber-400/80'
+                    : 'bg-slate-950 border-sky-400/60'
+                }`}
+                style={{
+                  left: tailLeftPercent,
+                  transform: 'translateX(-50%) rotate(45deg)',
+                }}
+              />
+            </div>
           </div>
-        </div>
-      )}
+        );
+      })()}
 
       {/* KHỐI THÂN NHÂN VẬT HỌC SINH (Phóng to / thu nhỏ 50% -> 300% quanh tâm chân 50% 88%) */}
       <div

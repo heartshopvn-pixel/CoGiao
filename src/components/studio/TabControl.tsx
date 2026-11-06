@@ -5,6 +5,7 @@ import {
   BookOpen,
   Download,
   FileUp,
+  Footprints,
   Heart,
   ImagePlus,
   MessageSquareQuote,
@@ -14,9 +15,11 @@ import {
   Plus,
   RotateCcw,
   Send,
+  Shuffle,
   SkipForward,
   Sliders,
   Sparkles,
+  Star,
   Trash2,
   UserCheck,
   UserPlus,
@@ -28,6 +31,7 @@ import {
   ClassBoardLetterMode,
   ClassBoardRuntimeState,
   CustomAssetsConfig,
+  EnglishQuizItem,
   GameConfig,
   GuideTaskItem,
   HudBoxCycleConfig,
@@ -37,6 +41,7 @@ import {
 } from '../../types/game';
 import {
   DEFAULT_GUIDE_ITEMS,
+  DEFAULT_QUIZ_DECKS,
   ENGLISH_QUIZ_QUESTIONS,
   formatEnglishQuizTxt,
   parseEnglishQuizTxt,
@@ -297,10 +302,109 @@ export const TabControl: React.FC<TabControlProps> = ({
       ? config.customQuizQuestions
       : ENGLISH_QUIZ_QUESTIONS;
 
-  const handleImportQuizTxtFile = (
-    file: File | undefined,
-    mode: 'append' | 'replace'
-  ) => {
+  const quizDecks =
+    Array.isArray(config.quizDecks) && config.quizDecks.length > 0
+      ? config.quizDecks
+      : DEFAULT_QUIZ_DECKS;
+
+  const selectedDeckId = config.activeQuizDeckId || quizDecks[0]?.id || 'deck-12a1';
+  const selectedDeck = quizDecks.find((d) => d.id === selectedDeckId) || quizDecks[0];
+
+  // Gán sao may mắn ngẫu nhiên theo tỉ lệ 1/2/3 sao
+  const assignLuckyStarsWithRatios = (items: EnglishQuizItem[]): EnglishQuizItem[] => {
+    const r1 = Math.max(0, config.luckyStarRatio1 ?? 70);
+    const r2 = Math.max(0, config.luckyStarRatio2 ?? 20);
+    const r3 = Math.max(0, config.luckyStarRatio3 ?? 10);
+    const total = r1 + r2 + r3 || 100;
+
+    return items.map((item) => {
+      if (item.luckyStars) return item;
+      const rnd = Math.random() * total;
+      let stars: 1 | 2 | 3 = 1;
+      if (rnd < r1) {
+        stars = 1;
+      } else if (rnd < r1 + r2) {
+        stars = 2;
+      } else {
+        stars = 3;
+      }
+      return { ...item, luckyStars: stars };
+    });
+  };
+
+  // Xáo trộn mảng Fisher-Yates
+  const shuffleQuestions = (items: EnglishQuizItem[]): EnglishQuizItem[] => {
+    const arr = [...items];
+    for (let i = arr.length - 1; i > 0; i--) {
+      const j = Math.floor(Math.random() * (i + 1));
+      [arr[i], arr[j]] = [arr[j], arr[i]];
+    }
+    return arr;
+  };
+
+  // Nạp đề vào hàng chờ: mode = 'append' (tiếp) | 'replace' (đè) | 'prepend' (đầu)
+  const handleLoadDeckToQueue = (mode: 'append' | 'replace' | 'prepend') => {
+    if (!selectedDeck || !selectedDeck.questions.length) {
+      setQuizImportFeedback('⚠️ Bộ đề được chọn không có câu hỏi nào!');
+      return;
+    }
+    let toLoad: EnglishQuizItem[] = selectedDeck.questions.map((q) => ({
+      ...q,
+      id: `en-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
+      deckName: selectedDeck.name,
+    }));
+    if (config.shuffleBeforeEnqueue) {
+      toLoad = shuffleQuestions(toLoad);
+    }
+    toLoad = assignLuckyStarsWithRatios(toLoad);
+
+    let nextQueue: EnglishQuizItem[] = [];
+    if (mode === 'replace') {
+      nextQueue = toLoad;
+      setQuizImportFeedback(`✅ Đã nạp đè ${toLoad.length} câu từ "${selectedDeck.name}"!`);
+    } else if (mode === 'prepend') {
+      nextQueue = [...toLoad, ...activeQuizList];
+      setQuizImportFeedback(`✅ Đã nạp ${toLoad.length} câu lên đầu hàng chờ!`);
+    } else {
+      nextQueue = [...activeQuizList, ...toLoad];
+      setQuizImportFeedback(`✅ Đã nạp tiếp ${toLoad.length} câu vào đuôi hàng chờ!`);
+    }
+    onUpdateConfig({ customQuizQuestions: nextQueue });
+  };
+
+  // Tùy chọn: Thêm sao trực tiếp vào câu hỏi ở đầu hàng chờ (hoặc câu hiện tại)
+  const handleSetHeadQuestionStars = (stars: 1 | 2 | 3) => {
+    if (!activeQuizList.length) return;
+    const nextList = [...activeQuizList];
+    const targetIdx = 0; // Đầu hàng chờ
+    nextList[targetIdx] = { ...nextList[targetIdx], luckyStars: stars };
+    onUpdateConfig({ customQuizQuestions: nextList });
+    setQuizImportFeedback(`⭐ Đã gán ${stars} Sao May Mắn (x${stars}đ) cho câu đầu hàng chờ!`);
+  };
+
+  // Thay đổi sao cho từng câu hỏi trực tiếp trong list (click chu kỳ 1 -> 2 -> 3 -> 1)
+  const handleCycleQuestionStars = (idx: number) => {
+    const nextList = [...activeQuizList];
+    const currentStars = nextList[idx]?.luckyStars || 1;
+    const nextStars: 1 | 2 | 3 = currentStars === 1 ? 2 : currentStars === 2 ? 3 : 1;
+    nextList[idx] = { ...nextList[idx], luckyStars: nextStars };
+    onUpdateConfig({ customQuizQuestions: nextList });
+  };
+
+  // Xóa 1 câu khỏi hàng chờ
+  const handleDeleteQueueQuestion = (idx: number) => {
+    const nextList = activeQuizList.filter((_, i) => i !== idx);
+    onUpdateConfig({ customQuizQuestions: nextList });
+  };
+
+  // Xóa sạch hàng chờ
+  const handleClearQuizQueue = () => {
+    onUpdateConfig({ customQuizQuestions: [] });
+    setQuizImportFeedback('🗑️ Đã xóa sạch hàng chờ câu hỏi!');
+  };
+
+  // Nạp file .txt tạo bộ đề mới đặt tên theo file
+  const handleUploadNewDeckFile = (file: File | undefined) => {
     if (!file) return;
     const reader = new FileReader();
     reader.onload = () => {
@@ -310,33 +414,19 @@ export const TabControl: React.FC<TabControlProps> = ({
         setQuizImportFeedback('⚠️ File .txt chưa đúng định dạng (Nghĩa Việt | Tiếng Anh)');
         return;
       }
-      if (mode === 'replace') {
-        const reindexed = parsed.map((q, idx) => ({ ...q, id: `en-${idx + 1}` }));
-        onUpdateConfig({ customQuizQuestions: reindexed });
-        setQuizImportFeedback(`✅ Đã thay thế bằng ${reindexed.length} câu hỏi từ file .txt!`);
-      } else {
-        const existingMap = new Map<string, { vi: string; en: string }>();
-        activeQuizList.forEach((q) => {
-          existingMap.set(q.en.toUpperCase(), { vi: q.vi, en: q.en.toUpperCase() });
-        });
-        let addedCount = 0;
-        parsed.forEach((q) => {
-          const key = q.en.toUpperCase();
-          if (!existingMap.has(key)) {
-            existingMap.set(key, { vi: q.vi, en: key });
-            addedCount += 1;
-          }
-        });
-        const merged = Array.from(existingMap.values()).map((q, idx) => ({
-          id: `en-${idx + 1}`,
-          vi: q.vi,
-          en: q.en,
-        }));
-        onUpdateConfig({ customQuizQuestions: merged });
-        setQuizImportFeedback(
-          `✅ Đã cộng thêm ${addedCount} câu mới (Tổng: ${merged.length} câu)!`
-        );
-      }
+      const newDeckId = `deck-${Date.now()}`;
+      const newDeckName = file.name || `De_${Date.now()}.txt`;
+      const newDeck = {
+        id: newDeckId,
+        name: newDeckName,
+        questions: parsed.map((q) => ({ ...q, deckName: newDeckName })),
+      };
+      const nextDecks = [...quizDecks, newDeck];
+      onUpdateConfig({
+        quizDecks: nextDecks,
+        activeQuizDeckId: newDeckId,
+      });
+      setQuizImportFeedback(`📁 Đã thêm bộ đề "${newDeckName}" (${parsed.length} câu)!`);
     };
     reader.readAsText(file, 'utf-8');
   };
@@ -710,90 +800,272 @@ export const TabControl: React.FC<TabControlProps> = ({
               </div>
             </div>
 
-            {/* Quản lý Bộ Câu Hỏi Tiếng Anh bằng file .txt (100 câu gốc + nạp file .txt) */}
-            <div className="flex flex-wrap items-center justify-between gap-1 pt-1 border-t border-stone-800/60">
-              <span className="text-[10px] font-bold text-stone-300">
-                📚 Bộ đề:{' '}
-                <strong className="text-emerald-300 font-mono">
-                  {activeQuizList.length} câu
-                </strong>
-              </span>
+            {/* QUẢN LÝ BỘ ĐỀ & HÀNG CHỜ CÂU HỎI TIẾNG ANH (THẺ CỐ ĐỊNH KÍCH THƯỚC) */}
+            <div className="p-2.5 rounded-xl bg-stone-950 border border-cyan-500/35 space-y-2 text-[10.5px]">
+              {/* Hàng 1: Dòng chữ đếm số hàng chờ + Nút chọn số lượng show (5/10/20/50) + Nút Xóa */}
+              <div className="flex items-center justify-between gap-1.5 pb-1 border-b border-stone-800">
+                <div className="flex items-center gap-1.5 min-w-0">
+                  <BookOpen className="w-3.5 h-3.5 text-cyan-400 shrink-0" />
+                  <span className="font-bold text-stone-200">
+                    Hàng chờ: <strong className="text-cyan-300 font-mono text-xs">{activeQuizList.length}</strong> câu
+                  </span>
+                </div>
 
-              <div className="flex items-center gap-1 flex-wrap">
-                <label
-                  title="Cộng thêm câu hỏi từ file .txt (Mỗi dòng: Nghĩa Việt | Tiếng Anh)"
-                  className="px-1.5 py-0.5 rounded bg-emerald-600/25 hover:bg-emerald-600/40 border border-emerald-400/50 text-[10px] font-bold text-emerald-200 flex items-center gap-1 cursor-pointer transition"
-                >
-                  <FileUp className="w-2.5 h-2.5" />
-                  <span>+Thêm .txt</span>
-                  <input
-                    type="file"
-                    accept=".txt,text/plain"
-                    className="hidden"
-                    onChange={(e) => {
-                      handleImportQuizTxtFile(e.target.files?.[0], 'append');
-                      e.target.value = '';
-                    }}
-                  />
-                </label>
-
-                <label
-                  title="Thay thế toàn bộ câu hỏi bằng file .txt"
-                  className="px-1.5 py-0.5 rounded bg-amber-600/25 hover:bg-amber-600/40 border border-amber-400/50 text-[10px] font-bold text-amber-200 flex items-center gap-1 cursor-pointer transition"
-                >
-                  <FileUp className="w-2.5 h-2.5" />
-                  <span>Thay .txt</span>
-                  <input
-                    type="file"
-                    accept=".txt,text/plain"
-                    className="hidden"
-                    onChange={(e) => {
-                      handleImportQuizTxtFile(e.target.files?.[0], 'replace');
-                      e.target.value = '';
-                    }}
-                  />
-                </label>
-
-                <button
-                  type="button"
-                  onClick={handleDownloadQuizTxt}
-                  title="Tải danh sách câu hỏi hiện tại về máy dạng file .txt"
-                  className="px-1.5 py-0.5 rounded bg-stone-800 hover:bg-stone-700 border border-stone-700 text-[10px] font-semibold text-stone-200 flex items-center gap-0.5 cursor-pointer"
-                >
-                  <Download className="w-2.5 h-2.5" />
-                  <span>Mẫu .txt</span>
-                </button>
-
-                {Array.isArray(config.customQuizQuestions) &&
-                  config.customQuizQuestions.length > 0 && (
+                <div className="flex items-center gap-1 shrink-0">
+                  <span className="text-[9.5px] text-stone-400">Hiện:</span>
+                  {[5, 10, 20, 50].map((num) => (
+                    <button
+                      key={num}
+                      type="button"
+                      onClick={() => onUpdateConfig({ quizQueueLimitDisplay: num })}
+                      className={`px-1.5 py-0.5 rounded font-mono font-bold text-[9.5px] cursor-pointer transition ${
+                        (config.quizQueueLimitDisplay ?? 10) === num
+                          ? 'bg-cyan-500 text-stone-950 shadow-sm'
+                          : 'bg-stone-800 hover:bg-stone-700 text-stone-300'
+                      }`}
+                    >
+                      {num}
+                    </button>
+                  ))}
+                  {activeQuizList.length > 0 && (
                     <button
                       type="button"
-                      onClick={() => {
-                        onUpdateConfig({ customQuizQuestions: [] });
-                        setQuizImportFeedback('🔄 Đã khôi phục 100 câu hỏi mặc định!');
-                      }}
-                      title="Khôi phục 100 câu hỏi mặc định"
-                      className="px-1.5 py-0.5 rounded bg-stone-800 hover:bg-stone-700 border border-stone-700 text-[10px] font-semibold text-rose-300 flex items-center gap-0.5 cursor-pointer"
+                      onClick={handleClearQuizQueue}
+                      className="ml-1 px-1.5 py-0.5 rounded bg-rose-950/80 hover:bg-rose-900 border border-rose-500/50 text-rose-200 font-bold text-[9px] cursor-pointer"
+                      title="Xóa sạch hàng chờ câu hỏi"
                     >
-                      <RotateCcw className="w-2.5 h-2.5" />
-                      <span>Gốc (100)</span>
+                      Xóa
                     </button>
                   )}
+                </div>
               </div>
-            </div>
 
-            {quizImportFeedback && (
-              <div className="text-[10px] text-emerald-300 bg-stone-950/90 px-2 py-0.5 rounded border border-emerald-500/30 flex items-center justify-between">
-                <span>{quizImportFeedback}</span>
-                <button
-                  type="button"
-                  onClick={() => setQuizImportFeedback(null)}
-                  className="text-stone-400 hover:text-stone-200 ml-2 cursor-pointer"
-                >
-                  ✕
-                </button>
+              {/* Hàng 2: List hàng chờ câu hỏi - CỐ ĐỊNH KÍCH THƯỚC (h-44 overflow-y-auto) */}
+              <div className="h-44 overflow-y-auto space-y-1 pr-1 border border-stone-900 rounded-lg p-1 bg-stone-900/40">
+                {activeQuizList.slice(0, config.quizQueueLimitDisplay ?? 10).map((q, idx) => {
+                  const isCurrent = idx === (classBoardState?.questionIndex ?? 0);
+                  const stars = q.luckyStars || 1;
+                  return (
+                    <div
+                      key={q.id || idx}
+                      className={`p-1.5 rounded-lg border flex items-center justify-between gap-1.5 transition ${
+                        isCurrent
+                          ? 'bg-emerald-950/60 border-emerald-500/70 shadow-sm'
+                          : 'bg-stone-900/80 border-stone-800/90 hover:border-stone-700'
+                      }`}
+                    >
+                      <div className="flex items-center gap-1.5 min-w-0">
+                        <span className="text-[9.5px] font-mono text-stone-400 w-5 text-right shrink-0">
+                          #{idx + 1}
+                        </span>
+                        {isCurrent && (
+                          <span className="px-1 py-0.2 rounded bg-emerald-500 text-stone-950 font-black text-[8.5px] shrink-0 animate-pulse">
+                            Đang phát
+                          </span>
+                        )}
+                        <span className="font-bold text-amber-200 truncate">
+                          "{q.vi}"
+                        </span>
+                        <span className="text-stone-400 text-[10px]">→</span>
+                        <span className="font-mono font-bold text-white truncate">
+                          {q.en}
+                        </span>
+                      </div>
+
+                      <div className="flex items-center gap-1 shrink-0">
+                        {/* Nút bấm đổi sao may mắn (cycle 1 -> 2 -> 3) */}
+                        <button
+                          type="button"
+                          onClick={() => handleCycleQuestionStars(idx)}
+                          title={`Đang có ${stars} Sao May Mắn (x${stars} điểm). Bấm để đổi 1 -> 2 -> 3 sao`}
+                          className={`px-1.5 py-0.5 rounded font-mono font-bold text-[9px] flex items-center gap-0.5 border cursor-pointer ${
+                            stars === 3
+                              ? 'bg-amber-500/30 border-yellow-300 text-yellow-200'
+                              : stars === 2
+                              ? 'bg-amber-500/20 border-amber-400 text-amber-300'
+                              : 'bg-stone-800 border-stone-700 text-stone-400'
+                          }`}
+                        >
+                          <span>{stars === 3 ? '⭐⭐⭐' : stars === 2 ? '⭐⭐' : '⭐'}</span>
+                          <span>x{stars}</span>
+                        </button>
+
+                        <button
+                          type="button"
+                          onClick={() => handleDeleteQueueQuestion(idx)}
+                          title="Xóa câu này khỏi hàng chờ"
+                          className="w-4 h-4 rounded hover:bg-rose-900/60 text-stone-400 hover:text-rose-200 flex items-center justify-center text-[10px] cursor-pointer"
+                        >
+                          ✕
+                        </button>
+                      </div>
+                    </div>
+                  );
+                })}
               </div>
-            )}
+
+              {/* Hàng 3: Chọn bộ đề theo dạng list, tên đề đặt theo tên file txt + Nạp tiếp / Nạp đè / Nạp đầu */}
+              <div className="space-y-1.5 pt-1 border-t border-stone-800">
+                <div className="flex items-center gap-1.5">
+                  <select
+                    value={selectedDeckId}
+                    onChange={(e) => onUpdateConfig({ activeQuizDeckId: e.target.value })}
+                    className="flex-1 px-2 py-1 rounded bg-stone-900 border border-stone-700 text-[10.5px] font-bold text-cyan-200 focus:outline-none truncate"
+                  >
+                    {quizDecks.map((d) => (
+                      <option key={d.id} value={d.id}>
+                        📄 {d.name} ({d.questions.length} câu)
+                      </option>
+                    ))}
+                  </select>
+
+                  <label
+                    title="Nạp file .txt mới và tạo bộ đề theo tên file"
+                    className="px-2 py-1 rounded bg-stone-800 hover:bg-stone-700 border border-stone-600 text-[10px] font-bold text-stone-200 flex items-center gap-1 cursor-pointer shrink-0"
+                  >
+                    <FileUp className="w-3 h-3 text-cyan-400" />
+                    <span>+Tệp .txt</span>
+                    <input
+                      type="file"
+                      accept=".txt,text/plain"
+                      className="hidden"
+                      onChange={(e) => {
+                        handleUploadNewDeckFile(e.target.files?.[0]);
+                        e.target.value = '';
+                      }}
+                    />
+                  </label>
+                </div>
+
+                {/* Nút bật/tắt xáo trộn + 3 Nút Nạp Đề Tiêu Đề Ngắn Gọn */}
+                <div className="flex items-center justify-between gap-1 flex-wrap">
+                  <label className="flex items-center gap-1 text-[10px] text-stone-300 font-semibold cursor-pointer select-none">
+                    <input
+                      type="checkbox"
+                      checked={config.shuffleBeforeEnqueue ?? false}
+                      onChange={(e) => onUpdateConfig({ shuffleBeforeEnqueue: e.target.checked })}
+                      className="accent-cyan-400 w-3 h-3"
+                    />
+                    <span>🔀 Xáo trộn</span>
+                  </label>
+
+                  <div className="flex items-center gap-1">
+                    <button
+                      type="button"
+                      onClick={() => handleLoadDeckToQueue('append')}
+                      className="px-2 py-1 rounded bg-emerald-600 hover:bg-emerald-500 text-stone-950 font-extrabold text-[10px] cursor-pointer shadow-sm transition"
+                    >
+                      📥 Nạp tiếp
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => handleLoadDeckToQueue('replace')}
+                      className="px-2 py-1 rounded bg-amber-600 hover:bg-amber-500 text-stone-950 font-extrabold text-[10px] cursor-pointer shadow-sm transition"
+                    >
+                      🔄 Nạp đè
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => handleLoadDeckToQueue('prepend')}
+                      className="px-2 py-1 rounded bg-cyan-600 hover:bg-cyan-500 text-stone-950 font-extrabold text-[10px] cursor-pointer shadow-sm transition"
+                    >
+                      ⬆️ Nạp đầu
+                    </button>
+                  </div>
+                </div>
+              </div>
+
+              {/* Hàng 4: 3 Tùy chọn Tỉ lệ câu hỏi có Sao May Mắn (1/2/3 tương đương x1 x2 x3 điểm) - Ô VUÔNG NHẬP SỐ */}
+              <div className="pt-1.5 border-t border-stone-800 space-y-1">
+                <div className="flex items-center justify-between text-stone-300 text-[10px] font-semibold">
+                  <span>Tỉ lệ Sao May Mắn (Hệ số điểm):</span>
+                  <span className="text-amber-300 font-mono text-[9.5px]">Ô vuông % (không cần thanh kéo)</span>
+                </div>
+                <div className="grid grid-cols-3 gap-1.5">
+                  <div className="p-1 rounded bg-stone-900 border border-stone-800 flex items-center justify-between gap-1">
+                    <span className="text-[9.5px] text-stone-300">⭐ 1★ (x1đ):</span>
+                    <input
+                      type="number"
+                      min={0}
+                      max={100}
+                      value={config.luckyStarRatio1 ?? 70}
+                      onChange={(e) => onUpdateConfig({ luckyStarRatio1: Math.max(0, parseInt(e.target.value, 10) || 0) })}
+                      className="w-10 px-1 py-0.5 rounded bg-stone-950 border border-stone-700 text-center font-mono font-bold text-[10px] text-emerald-300 focus:outline-none focus:border-cyan-400"
+                    />
+                    <span className="text-[9px] text-stone-400">%</span>
+                  </div>
+
+                  <div className="p-1 rounded bg-stone-900 border border-stone-800 flex items-center justify-between gap-1">
+                    <span className="text-[9.5px] text-amber-200">⭐⭐ 2★ (x2đ):</span>
+                    <input
+                      type="number"
+                      min={0}
+                      max={100}
+                      value={config.luckyStarRatio2 ?? 20}
+                      onChange={(e) => onUpdateConfig({ luckyStarRatio2: Math.max(0, parseInt(e.target.value, 10) || 0) })}
+                      className="w-10 px-1 py-0.5 rounded bg-stone-950 border border-stone-700 text-center font-mono font-bold text-[10px] text-amber-300 focus:outline-none focus:border-cyan-400"
+                    />
+                    <span className="text-[9px] text-stone-400">%</span>
+                  </div>
+
+                  <div className="p-1 rounded bg-stone-900 border border-stone-800 flex items-center justify-between gap-1">
+                    <span className="text-[9.5px] text-yellow-300">⭐⭐⭐ 3★ (x3đ):</span>
+                    <input
+                      type="number"
+                      min={0}
+                      max={100}
+                      value={config.luckyStarRatio3 ?? 10}
+                      onChange={(e) => onUpdateConfig({ luckyStarRatio3: Math.max(0, parseInt(e.target.value, 10) || 0) })}
+                      className="w-10 px-1 py-0.5 rounded bg-stone-950 border border-stone-700 text-center font-mono font-bold text-[10px] text-yellow-300 focus:outline-none focus:border-cyan-400"
+                    />
+                    <span className="text-[9px] text-stone-400">%</span>
+                  </div>
+                </div>
+              </div>
+
+              {/* Hàng 5: Tùy chọn Thêm sao trực tiếp vào câu hỏi ở đầu hàng chờ */}
+              <div className="pt-1 border-t border-stone-800 flex items-center justify-between gap-1 flex-wrap">
+                <span className="text-[10px] font-semibold text-stone-300">
+                  Gán sao câu đầu hàng chờ:
+                </span>
+                <div className="flex items-center gap-1">
+                  <button
+                    type="button"
+                    onClick={() => handleSetHeadQuestionStars(1)}
+                    className="px-2 py-0.5 rounded bg-stone-800 hover:bg-stone-700 border border-stone-700 text-[9.5px] font-bold text-stone-200 cursor-pointer"
+                  >
+                    ⭐ 1★ (x1)
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => handleSetHeadQuestionStars(2)}
+                    className="px-2 py-0.5 rounded bg-amber-950/80 hover:bg-amber-900 border border-amber-500/50 text-[9.5px] font-bold text-amber-200 cursor-pointer"
+                  >
+                    ⭐⭐ 2★ (x2)
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => handleSetHeadQuestionStars(3)}
+                    className="px-2 py-0.5 rounded bg-gradient-to-r from-amber-500 to-rose-500 text-slate-950 font-black text-[9.5px] cursor-pointer shadow-sm"
+                  >
+                    ⭐⭐⭐ 3★ (x3)
+                  </button>
+                </div>
+              </div>
+
+              {quizImportFeedback && (
+                <div className="text-[10px] text-cyan-300 bg-stone-900/90 px-2 py-0.5 rounded border border-cyan-500/30 flex items-center justify-between">
+                  <span>{quizImportFeedback}</span>
+                  <button
+                    type="button"
+                    onClick={() => setQuizImportFeedback(null)}
+                    className="text-stone-400 hover:text-stone-200 ml-2 cursor-pointer"
+                  >
+                    ✕
+                  </button>
+                </div>
+              )}
+            </div>
           </div>
         )}
 
@@ -1145,6 +1417,76 @@ export const TabControl: React.FC<TabControlProps> = ({
                 </div>
               ))
             )}
+          </div>
+        </div>
+      </section>
+
+      {/* 1B. THẺ ĐIỀU CHỈNH TỐC ĐỘ DI CHUYỂN HỌC SINH (SẮP XẾP LỚP & TẶNG HOA THẦY/CÔ) */}
+      <section className="p-3 rounded-xl bg-stone-900/75 border border-stone-800 space-y-2.5">
+        <div className="flex items-center justify-between">
+          <div className="flex items-center gap-1.5">
+            <Footprints className="w-4 h-4 text-emerald-400" />
+            <h2 className="text-xs font-bold text-emerald-200">Tốc Độ Di Chuyển Học Sinh</h2>
+          </div>
+          <button
+            type="button"
+            onClick={() =>
+              onUpdateConfig({
+                studentSeatingSpeed: 110,
+                studentGiftSpeed: 185,
+              })
+            }
+            className="px-2 py-0.5 rounded bg-stone-800 hover:bg-stone-700 text-[10px] text-stone-300 font-semibold cursor-pointer"
+          >
+            Mặc định
+          </button>
+        </div>
+
+        <div className="grid grid-cols-2 gap-2 text-[10.5px]">
+          {/* 1. Sắp xếp lớp */}
+          <div className="p-2 rounded-lg bg-stone-950 border border-stone-800 space-y-1">
+            <div className="flex justify-between items-center text-stone-300">
+              <span className="font-semibold">Sắp xếp lớp</span>
+              <span className="font-mono font-bold text-emerald-300">
+                {config.studentSeatingSpeed ?? 110} px/s
+              </span>
+            </div>
+            <input
+              type="range"
+              min={50}
+              max={300}
+              step={5}
+              value={config.studentSeatingSpeed ?? 110}
+              onChange={(e) =>
+                onUpdateConfig({
+                  studentSeatingSpeed: parseInt(e.target.value, 10) || 110,
+                })
+              }
+              className="w-full accent-emerald-400 h-1.5 bg-stone-800 rounded-lg cursor-pointer"
+            />
+          </div>
+
+          {/* 2. Tặng hoa Thầy & Cô */}
+          <div className="p-2 rounded-lg bg-stone-950 border border-stone-800 space-y-1">
+            <div className="flex justify-between items-center text-stone-300">
+              <span className="font-semibold">Tặng hoa Thầy & Cô</span>
+              <span className="font-mono font-bold text-pink-300">
+                {config.studentGiftSpeed ?? 185} px/s
+              </span>
+            </div>
+            <input
+              type="range"
+              min={80}
+              max={450}
+              step={5}
+              value={config.studentGiftSpeed ?? 185}
+              onChange={(e) =>
+                onUpdateConfig({
+                  studentGiftSpeed: parseInt(e.target.value, 10) || 185,
+                })
+              }
+              className="w-full accent-pink-400 h-1.5 bg-stone-800 rounded-lg cursor-pointer"
+            />
           </div>
         </div>
       </section>

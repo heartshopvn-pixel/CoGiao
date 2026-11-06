@@ -1715,6 +1715,71 @@ export const TabMapEditor: React.FC<TabMapEditorProps> = React.memo(({
             </div>
           </div>
 
+          {/* Điều chỉnh vị trí Bong bóng chat theo chiều ngang (Độ lệch ngang: Tự nhận diện học sinh ngồi bên phải đẩy sang phải, ngồi bên trái đẩy sang trái) */}
+          <div className="flex items-center justify-between gap-2 pt-1 border-t border-stone-800/80 text-[10.5px]">
+            <span
+              className="text-stone-300"
+              title="Chỉ cần chỉnh 1 chiều: Tự nhận diện học sinh ngồi bên phải thì đẩy bong bóng sang phải, ngồi bên trái thì đẩy sang trái, không đè lên người nhau"
+            >
+              Vị trí ngang (Tự tách 2 bên):
+            </span>
+            <div className="flex items-center gap-1">
+              <button
+                type="button"
+                onClick={() =>
+                  onUpdateConfig({
+                    chatBubbleOffsetX: Math.max(
+                      0,
+                      (config.chatBubbleOffsetX ?? 24) - 2
+                    ),
+                  })
+                }
+                className="w-5 h-5 rounded bg-stone-800 hover:bg-stone-700 border border-stone-700 flex items-center justify-center text-stone-200 cursor-pointer"
+                title="Giảm độ lệch ngang"
+              >
+                <Minus className="w-3 h-3" />
+              </button>
+              <input
+                type="range"
+                min={0}
+                max={120}
+                step={1}
+                value={config.chatBubbleOffsetX ?? 24}
+                onChange={(e) =>
+                  onUpdateConfig({
+                    chatBubbleOffsetX: Math.max(0, parseInt(e.target.value, 10) || 0),
+                  })
+                }
+                className="w-20 accent-sky-400 h-1.5 bg-stone-800 rounded-lg cursor-pointer"
+              />
+              <button
+                type="button"
+                onClick={() =>
+                  onUpdateConfig({
+                    chatBubbleOffsetX: Math.min(
+                      120,
+                      (config.chatBubbleOffsetX ?? 24) + 2
+                    ),
+                  })
+                }
+                className="w-5 h-5 rounded bg-sky-500/20 hover:bg-sky-500/35 border border-sky-500/40 flex items-center justify-center text-sky-300 cursor-pointer"
+                title="Tăng độ lệch ngang"
+              >
+                <Plus className="w-3 h-3" />
+              </button>
+              <button
+                type="button"
+                onClick={() => onUpdateConfig({ chatBubbleOffsetX: 24 })}
+                className="px-1.5 py-0.5 rounded bg-stone-800 hover:bg-stone-700 text-[9px] font-mono text-stone-300 cursor-pointer"
+              >
+                24px
+              </button>
+              <span className="w-11 text-right font-mono font-bold text-sky-300 tabular-nums">
+                {config.chatBubbleOffsetX ?? 24}px
+              </span>
+            </div>
+          </div>
+
           {/* Thời gian hiện bong bóng chat */}
           <div className="pt-1 border-t border-stone-800/80">
             <div className="flex justify-between text-[10.5px] text-stone-300 mb-0.5">

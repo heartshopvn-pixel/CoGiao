@@ -1367,7 +1367,8 @@ export function useClassroomEngine() {
 
       const groupRank = isSeated ? prevClassCount + 1 : prevOutsideCount + 1;
       const baseRewardPoints = getQuizRankPoints(groupRank);
-      const rewardPoints = baseRewardPoints * punishmentMult;
+      const luckyMult = bState.currentQuestion?.luckyStars || 1;
+      const rewardPoints = baseRewardPoints * punishmentMult * luckyMult;
 
       if (existingInClass) {
         const nowScore = Date.now();
@@ -1456,11 +1457,17 @@ export function useClassroomEngine() {
                 p.punishmentMultiplier
             );
             const mult = punishedMatch?.punishmentMultiplier || 1;
-            return { ...w, points: getQuizRankPoints(idx + 1) * mult };
+            const luckyMult = prev.currentQuestion?.luckyStars || 1;
+            return { ...w, points: getQuizRankPoints(idx + 1) * mult * luckyMult };
           });
         const nextOutsideWinners = nextWinners
           .filter((w) => w.isSeated === false)
-          .map((w, idx) => ({ ...w, points: getQuizRankPoints(idx + 1) }));
+          .map((w, idx) => ({
+            ...w,
+            points:
+              getQuizRankPoints(idx + 1) *
+              (prev.currentQuestion?.luckyStars || 1),
+          }));
 
         const nextState: ClassBoardRuntimeState = {
           ...prev,
@@ -3383,16 +3390,18 @@ export function useClassroomEngine() {
           const burnerX = cfg.incenseBurner.x;
           const burnerY = cfg.incenseBurner.y;
 
+          const seatingSpeed = cfg.studentSeatingSpeed ?? (p.speed || 110);
+
           if (state === 'walk_in_up') {
             // Học sinh tặng quà đi từ cửa chính bên trái (chỉ đi ngang rồi đi dọc) lên trước bàn Giáo viên
             const dx = burnerX - x;
             const dy = burnerY - y;
             if (Math.abs(dx) > 4) {
-              x += Math.sign(dx) * p.speed * dt;
+              x += Math.sign(dx) * seatingSpeed * dt;
               facingLeft = dx < 0;
             } else if (Math.abs(dy) > 4) {
               x = burnerX;
-              y += Math.sign(dy) * p.speed * dt;
+              y += Math.sign(dy) * seatingSpeed * dt;
             } else {
               x = burnerX;
               y = burnerY;
@@ -3427,11 +3436,11 @@ export function useClassroomEngine() {
             const dxAisle = p.laneX - x;
             const dyRow = p.slotY - y;
             if (Math.abs(dxAisle) > 4) {
-              x += Math.sign(dxAisle) * p.speed * dt;
+              x += Math.sign(dxAisle) * seatingSpeed * dt;
               facingLeft = dxAisle < 0;
             } else if (Math.abs(dyRow) > 4) {
               x = p.laneX;
-              y += Math.sign(dyRow) * p.speed * dt;
+              y += Math.sign(dyRow) * seatingSpeed * dt;
             } else {
               x = p.laneX;
               y = p.slotY;
@@ -3443,7 +3452,7 @@ export function useClassroomEngine() {
             y = p.slotY;
             const dx = p.slotX - x;
             if (Math.abs(dx) > 3) {
-              x += Math.sign(dx) * (p.speed * 0.9) * dt;
+              x += Math.sign(dx) * (seatingSpeed * 0.9) * dt;
               facingLeft = dx < 0;
             } else {
               x = p.slotX;
@@ -3476,7 +3485,7 @@ export function useClassroomEngine() {
             }
           } else if (state === 'walk_to_teacher_gift') {
             // Học sinh cầm hoa đi vuông góc từ bàn ra lối đi dọc -> lên bục giảng (hoặc tới cạnh Thầy Giám Thị)
-            const moveSpeed = Math.max(p.speed, 185);
+            const moveSpeed = cfg.studentGiftSpeed ?? Math.max(p.speed, 185);
             const targetPos = p.giftTargetPos || {
               x: cfg.incenseBurner.x,
               y: cfg.incenseBurner.y,
@@ -3701,7 +3710,7 @@ export function useClassroomEngine() {
               stateTimer = 0;
             } else {
               // Đi vuông góc quay về đúng ghế bàn đôi của mình
-              const returnSpeed = Math.max(p.speed, 195);
+              const returnSpeed = cfg.studentGiftSpeed ?? Math.max(p.speed, 195);
               const dxToLane = p.laneX - x;
               const dyToSlot = p.slotY - y;
               const dxToSeat = p.slotX - x;
@@ -3883,7 +3892,7 @@ export function useClassroomEngine() {
             } = r;
             animTime += dt;
             stateTimer += dt;
-            const moveSpeed = Math.max(r.speed, 205);
+            const moveSpeed = cfg.studentGiftSpeed ?? Math.max(r.speed, 205);
 
             if (state === 'walk_to_teacher_gift') {
               const targetPos = r.giftTargetPos || {

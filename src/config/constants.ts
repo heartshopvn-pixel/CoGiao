@@ -848,6 +848,17 @@ export const DEFAULT_CONFIG: GameConfig = {
     'Mời bạn [Tên] mới quậy trong lớp lên đây đứng 1 lượt!',
   lessonPunishmentMultiTtsTemplate:
     'Mời các bạn [DanhSáchTên] mới quậy trong lớp lên đây đứng 1 lượt!',
+  customQuizQuestions: [],
+  quizDecks: [],
+  activeQuizDeckId: 'deck-12a1',
+  quizQueueLimitDisplay: 10,
+  shuffleBeforeEnqueue: false,
+  luckyStarRatio1: 70,
+  luckyStarRatio2: 20,
+  luckyStarRatio3: 10,
+
+  studentSeatingSpeed: 110,
+  studentGiftSpeed: 185,
 
   abbotBubbleEnabled: true,
   teacherBubbleScale: 1.0,
@@ -914,6 +925,7 @@ export const DEFAULT_CONFIG: GameConfig = {
   chatBubbleMaxHeight: 110,
   chatBubbleFontSize: 11,
   chatBubbleOffsetY: 0,
+  chatBubbleOffsetX: 24,
   grandEventTarget: 50,
   maxFlyingLotuses: 5,
   spawnPoint: { x: 16, y: 472 },
@@ -1236,6 +1248,28 @@ export function formatEnglishQuizTxt(items: EnglishQuizItem[]): string {
     .map((q) => (q.phonetic ? `${q.vi} | ${q.en} | ${q.phonetic}` : `${q.vi} | ${q.en}`))
     .join('\n');
 }
+
+export const DEFAULT_QUIZ_DECKS: Array<{
+  id: string;
+  name: string;
+  questions: EnglishQuizItem[];
+}> = [
+  {
+    id: 'deck-12a1',
+    name: '12A1_CoBan.txt',
+    questions: ENGLISH_QUIZ_QUESTIONS.slice(0, 30),
+  },
+  {
+    id: 'deck-ielts',
+    name: 'IELTS_TuVung.txt',
+    questions: ENGLISH_QUIZ_QUESTIONS.slice(30, 65),
+  },
+  {
+    id: 'deck-nangcao',
+    name: '12A1_NangCao.txt',
+    questions: ENGLISH_QUIZ_QUESTIONS.slice(65, 100),
+  },
+];
 
 export const INITIAL_DONORS: DonorEntry[] = [];
 

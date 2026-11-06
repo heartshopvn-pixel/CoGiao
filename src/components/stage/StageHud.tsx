@@ -1284,6 +1284,21 @@ export const StageHud: React.FC<StageHudProps> = ({
                   <span className="font-extrabold tracking-wide text-amber-200 uppercase truncate">
                     Tiết Tiếng Anh • Câu #{qIdx + 1}/{totalQuizCount}
                   </span>
+                  {Boolean(quizItem.luckyStars) && (
+                    <span
+                      className={`px-1.5 py-0.5 rounded font-mono font-black text-[9.5px] leading-none border flex items-center gap-0.5 shrink-0 ${
+                        quizItem.luckyStars === 3
+                          ? 'bg-gradient-to-r from-amber-500 via-yellow-300 to-rose-500 text-slate-950 border-yellow-200 shadow-[0_0_10px_rgba(250,204,21,0.9)] animate-pulse'
+                          : quizItem.luckyStars === 2
+                          ? 'bg-gradient-to-r from-amber-500 to-orange-500 text-slate-950 border-amber-200 shadow-[0_0_8px_rgba(251,191,36,0.8)]'
+                          : 'bg-emerald-500/30 text-emerald-200 border-emerald-400'
+                      }`}
+                      title={`Hệ số điểm: x${quizItem.luckyStars}`}
+                    >
+                      <span>{quizItem.luckyStars === 3 ? '⭐⭐⭐' : quizItem.luckyStars === 2 ? '⭐⭐' : '⭐'}</span>
+                      <span>x{quizItem.luckyStars}</span>
+                    </span>
+                  )}
                 </div>
 
                 <div className="flex items-center gap-1.5 shrink-0">
@@ -1312,6 +1327,19 @@ export const StageHud: React.FC<StageHudProps> = ({
 
               {/* Nội dung trung tâm: Câu hỏi hoặc "Đáp án là:" + Các ô chữ cái tương ứng */}
               <div className="my-auto flex flex-col items-center justify-center gap-2 py-1">
+                {/* HIỆU ỨNG SAO MAY MẮN TRÊN BẢNG LỚP */}
+                {Boolean(quizItem.luckyStars && quizItem.luckyStars >= 2) && (
+                  <div className="flex items-center justify-center gap-1.5 px-3 py-1 rounded-full bg-gradient-to-r from-amber-500/25 via-yellow-400/35 to-amber-500/25 border-2 border-yellow-300/90 shadow-[0_0_16px_rgba(250,204,21,0.85)] animate-pulse">
+                    <Sparkles className="w-3.5 h-3.5 text-yellow-300 animate-spin" />
+                    <span className="font-black text-[12px] uppercase tracking-wider text-yellow-200 drop-shadow-[0_2px_4px_rgba(0,0,0,0.85)]">
+                      {quizItem.luckyStars === 3
+                        ? '⭐⭐⭐ SAO MAY MẮN • NHÂN 3 ĐIỂM (x3) ⭐⭐⭐'
+                        : '⭐⭐ SAO MAY MẮN • NHÂN 2 ĐIỂM (x2) ⭐⭐'}
+                    </span>
+                    <Sparkles className="w-3.5 h-3.5 text-yellow-300 animate-spin" />
+                  </div>
+                )}
+
                 <div
                   className="text-center font-extrabold text-white leading-snug tracking-wide"
                   style={{ fontSize: `${safeClassBoardFontSize + 2}px` }}
