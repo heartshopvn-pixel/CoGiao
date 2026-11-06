@@ -625,7 +625,12 @@ const singleCutoutPromises = new Map<string, Promise<string>>();
  * - Xóa cả vùng nền trắng bên ngoài lẫn vùng nền trắng kẹt giữa 4 chân bàn
  * - Làm mềm viền (feather alpha) để bàn gỗ tiệp hoàn hảo vào nền gạch bông lớp học
  */
-export function processSingleCutoutImage(url: string): Promise<string> {
+export function normalizeAssetUrl(url: string): string {
+  return url.startsWith('/assets/') ? `.${url}` : url;
+}
+
+export function processSingleCutoutImage(rawUrl: string): Promise<string> {
+  const url = normalizeAssetUrl(rawUrl);
   const cacheKey = `${CACHE_VERSION}::single_cutout::${url}`;
   if (singleCutoutCache.has(cacheKey)) {
     return Promise.resolve(singleCutoutCache.get(cacheKey)!);
@@ -846,8 +851,9 @@ export function processSingleCutoutImage(url: string): Promise<string> {
 }
 
 export function useProcessedSingleCutout(
-  url: string | null | undefined
+  rawUrl: string | null | undefined
 ): string | null {
+  const url = rawUrl ? normalizeAssetUrl(rawUrl) : null;
   const [processedUrl, setProcessedUrl] = useState<string | null>(() => {
     if (!url) return null;
     const cacheKey = `${CACHE_VERSION}::single_cutout::${url}`;

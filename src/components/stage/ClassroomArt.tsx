@@ -73,7 +73,11 @@ export const ClassroomArt: React.FC<ClassroomArtProps> = ({
       {/* 1. NỀN LỚP HỌC CẤP 3 VIỆT NAM (Tường vàng kem, cửa sổ nắng & hoa phượng, bảng phấn xanh, sàn gạch bông) */}
       {customAssets.customBgUrl ? (
         <img
-          src={customAssets.customBgUrl}
+          src={
+            customAssets.customBgUrl.startsWith('/assets/')
+              ? `.${customAssets.customBgUrl}`
+              : customAssets.customBgUrl
+          }
           alt="Classroom Background"
           className="absolute inset-0 w-full h-full object-cover"
         />

@@ -16,28 +16,28 @@ import {
 } from '../types/game';
 
 export const DEFAULT_BG_IMAGE =
-  '/assets/aistudio/a5c97e27-3fbf-4c87-b5fa-36b9fd61be24_37000eba.jpg';
+  './assets/aistudio/a5c97e27-3fbf-4c87-b5fa-36b9fd61be24_37000eba.jpg';
 
 export const DEFAULT_DESK_IMAGE =
-  '/assets/aistudio/Worn_Wooden_School_Desk_Cutout_7c1da1e1.png';
+  './assets/aistudio/Worn_Wooden_School_Desk_Cutout_7c1da1e1.png';
 
 export const DEFAULT_GIRL_STUDENT_STANDING_IMG =
-  '/assets/aistudio/girl_student_2281d561.png';
+  './assets/aistudio/girl_student_2281d561.png';
 
 export const DEFAULT_GIRL_STUDENT_SEATED_IMG =
-  '/assets/aistudio/girl_student_Seated_on_Wooden_Chair.png_b39dabf8.png';
+  './assets/aistudio/girl_student_Seated_on_Wooden_Chair.png_b39dabf8.png';
 
 export const DEFAULT_BOY_STUDENT_STANDING_IMG =
-  '/assets/aistudio/boy_student_3dde846e.png';
+  './assets/aistudio/boy_student_3dde846e.png';
 
 export const DEFAULT_BOY_STUDENT_SEATED_IMG =
-  '/assets/aistudio/boy_student_Seated_on_Wooden_Chair_47ed896b.png';
+  './assets/aistudio/boy_student_Seated_on_Wooden_Chair_47ed896b.png';
 
 export const DEFAULT_FEMALE_TEACHER_IMG =
-  '/assets/aistudio/Girl_Teacher_29eb2706.png';
+  './assets/aistudio/Girl_Teacher_29eb2706.png';
 
 export const DEFAULT_MALE_TEACHER_IMG =
-  '/assets/aistudio/Male_Teacher.jpg';
+  './assets/aistudio/Male_Teacher.jpg';
 
 export const DEFAULT_SPRITESHEETS: CustomAssetsConfig = {
   customBgUrl: DEFAULT_BG_IMAGE,
