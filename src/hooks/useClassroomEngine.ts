@@ -7649,6 +7649,15 @@ export function useClassroomEngine() {
         case 'UPDATE_CONFIG':
           if (p.patch) {
             setConfig((prev) => ({ ...prev, ...p.patch }));
+            if (
+              Array.isArray(p.patch.customQuizQuestions) &&
+              p.patch.customQuizQuestions.length > 0
+            ) {
+              setClassBoardState((prev) => ({
+                ...prev,
+                totalQuestions: p.patch.customQuizQuestions.length,
+              }));
+            }
           }
           break;
         case 'UPDATE_HUD_LAYOUT':
@@ -7671,14 +7680,57 @@ export function useClassroomEngine() {
             }));
           }
           break;
-        case 'UPDATE_SLOTS':
+        case 'UPDATE_SLOTS': {
+          const movedSlotMap = new Map<string, KneelSlot>();
           if (Array.isArray(p.vipSlots)) {
-            setVipSlots(p.vipSlots);
+            const currentOccMap = new Map<string, number | null>();
+            vipSlotsRef.current.forEach((s) => currentOccMap.set(s.id, s.occupiedById));
+            const mergedVip: KneelSlot[] = p.vipSlots.map((incoming: KneelSlot) => {
+              const preservedOcc = currentOccMap.has(incoming.id)
+                ? currentOccMap.get(incoming.id) ?? null
+                : null;
+              const nextSlot = { ...incoming, occupiedById: preservedOcc };
+              movedSlotMap.set(nextSlot.id, nextSlot);
+              return nextSlot;
+            });
+            vipSlotsRef.current = mergedVip;
+            setVipSlots(mergedVip);
           }
           if (Array.isArray(p.normalSlots)) {
-            setNormalSlots(p.normalSlots);
+            const currentOccMap = new Map<string, number | null>();
+            normalSlotsRef.current.forEach((s) => currentOccMap.set(s.id, s.occupiedById));
+            const mergedNorm: KneelSlot[] = p.normalSlots.map((incoming: KneelSlot) => {
+              const preservedOcc = currentOccMap.has(incoming.id)
+                ? currentOccMap.get(incoming.id) ?? null
+                : null;
+              const nextSlot = { ...incoming, occupiedById: preservedOcc };
+              movedSlotMap.set(nextSlot.id, nextSlot);
+              return nextSlot;
+            });
+            normalSlotsRef.current = mergedNorm;
+            setNormalSlots(mergedNorm);
+          }
+          if (movedSlotMap.size > 0) {
+            const nextPilgrims = pilgrimsRef.current.map((st) => {
+              if (!st.slotId) return st;
+              const nextSlot = movedSlotMap.get(st.slotId);
+              if (!nextSlot) return st;
+              const isSeated = st.state === 'pray_seated';
+              return {
+                ...st,
+                slotX: nextSlot.x,
+                slotY: nextSlot.y,
+                laneX: nextSlot.aisleX ?? st.laneX,
+                x: isSeated ? nextSlot.x : st.x,
+                y: isSeated ? nextSlot.y : st.y,
+                facingLeft: isSeated ? nextSlot.x < 270 : st.facingLeft,
+              };
+            });
+            pilgrimsRef.current = nextPilgrims;
+            setPilgrims(nextPilgrims);
           }
           break;
+        }
         case 'TRIGGER_LIKE':
           handleTriggerLike(p.count || 15, p.username || 'Học Sinh', false);
           break;
@@ -9152,10 +9204,14 @@ export function useClassroomEngine() {
     syncService.sendCommand('UPDATE_HUD_LAYOUT', {
       patch: configRef.current.hudLayout,
     });
-    syncService.sendCommand('SYNC_CLASS_BOARD_STATE', {
-      state: classBoardStateRef.current,
+    syncService.sendCommand('UPDATE_SLOTS', {
+      vipSlots: vipSlotsRef.current,
+      normalSlots: normalSlotsRef.current,
     });
-    pushToast('✅ Đã đồng bộ cấu hình sang màn hình Live (?obs=1)', false);
+    pushToast(
+      '✅ Đã đồng bộ cấu hình Dev, HUD & vị trí bàn ghế sang Live (Giữ nguyên tiến trình & bảng điểm Live)',
+      false
+    );
   }, [pushToast]);
 
   // Nút điều khiển NPC & Safety
