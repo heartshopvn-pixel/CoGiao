@@ -72,6 +72,12 @@ export const TabTikTokNode: React.FC<TabTikTokNodeProps> = ({ wsStatus, onConnec
           </button>
         </div>
 
+        {wsStatus !== 'connected' && syncService.getStatusDetail() && (
+          <p className="text-[10px] leading-relaxed text-rose-300 bg-rose-950/40 border border-rose-900/60 rounded-lg p-2">
+            {syncService.getStatusDetail()}
+          </p>
+        )}
+
         <div className="flex items-center gap-1.5">
           <button
             type="button"
