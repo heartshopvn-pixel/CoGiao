@@ -150,9 +150,48 @@ class LiveSyncService {
     return () => this.peerListeners.delete(fn);
   }
 
-  private setStatus(next: WsConnectionStatus) {
+  private statusDetail = '';
+  private reconnectAttempts = 0;
+
+  private setStatus(next: WsConnectionStatus, detail = '') {
     this.status = next;
+    this.statusDetail = detail;
     this.statusListeners.forEach((fn) => fn(next));
+  }
+
+  /** Lý do chi tiết của trạng thái hiện tại (hiển thị trong tab Kết nối) */
+  public getStatusDetail(): string {
+    return this.statusDetail;
+  }
+
+  /**
+   * Chrome (từ bản 142) chặn trang public (GitHub Pages) kết nối tới localhost
+   * cho đến khi người dùng cấp quyền "loopback-network" / "local-network".
+   */
+  private async queryLoopbackPermission(): Promise<PermissionState | 'unsupported'> {
+    try {
+      if (!navigator.permissions?.query) return 'unsupported';
+      for (const name of ['loopback-network', 'local-network']) {
+        try {
+          const res = await navigator.permissions.query({ name: name as PermissionName });
+          return res.state;
+        } catch {
+          // thử tên quyền tiếp theo
+        }
+      }
+    } catch {
+      // ignore
+    }
+    return 'unsupported';
+  }
+
+  private isLoopbackUrl(url: string): boolean {
+    try {
+      const h = new URL(url).hostname.replace(/^\[|\]$/g, '');
+      return h === 'localhost' || h === '127.0.0.1' || h === '::1' || h.endsWith('.localhost');
+    } catch {
+      return false;
+    }
   }
 
   public getStatus(): WsConnectionStatus {
@@ -245,24 +284,58 @@ class LiveSyncService {
     this.setStatus('simulated');
   }
 
-  public connectWebSocket(url: string) {
+  public connectWebSocket(url: string, isRetry = false) {
     if (!url.trim()) return;
-    this.lastWsUrl = url.trim();
+    const target = url.trim();
+    this.lastWsUrl = target;
     this.shouldReconnectWs = true;
+    if (!isRetry) this.reconnectAttempts = 0;
     if (this.reconnectWsTimer) {
       clearTimeout(this.reconnectWsTimer);
       this.reconnectWsTimer = null;
     }
+    void this.openSocket(target);
+  }
+
+  private async openSocket(target: string) {
     try {
+      // Hủy socket cũ hoàn toàn để handler cũ không ghi đè trạng thái socket mới
       if (this.ws) {
-        this.ws.onclose = null;
-        this.ws.close();
+        const old = this.ws;
+        this.ws = null;
+        old.onopen = null;
+        old.onmessage = null;
+        old.onerror = null;
+        old.onclose = null;
+        try {
+          old.close();
+        } catch {
+          // ignore
+        }
       }
+
+      // Trang https (GitHub Pages) -> ws://localhost: kiểm tra quyền mạng cục bộ của Chrome
+      if (this.isLoopbackUrl(target) && window.location.protocol === 'https:') {
+        const perm = await this.queryLoopbackPermission();
+        if (perm === 'denied') {
+          this.shouldReconnectWs = false;
+          this.setStatus(
+            'error',
+            'Chrome đang CHẶN trang này kết nối tới localhost. Bấm biểu tượng ổ khóa cạnh địa chỉ trang → Cài đặt trang web → "Mạng cục bộ / Local network access" → Cho phép, rồi bấm Kết nối lại.'
+          );
+          return;
+        }
+      }
+
       this.setStatus('connecting');
-      const socket = new WebSocket(this.lastWsUrl);
+      const socket = new WebSocket(target);
       this.ws = socket;
+      let everOpened = false;
 
       socket.onopen = () => {
+        if (this.ws !== socket) return;
+        everOpened = true;
+        this.reconnectAttempts = 0;
         this.setStatus('connected');
         // Khi kết nối WebSocket thành công, nếu đây là màn hình Live (?obs=1) thì lập tức xin đồng bộ toàn bộ vị trí bảng & cấu hình từ Chrome
         if (this.isObsView()) {
@@ -357,7 +430,9 @@ class LiveSyncService {
       };
 
       socket.onmessage = (event) => {
+        if (this.ws !== socket) return;
         try {
+          if (typeof event.data !== 'string') return;
           const raw = JSON.parse(event.data);
           if (raw.type === 'ADMIN_SYNC') {
             this.dispatchIncomingSync(raw as SyncPacket);
@@ -436,21 +511,40 @@ class LiveSyncService {
         }
       };
 
-      socket.onclose = () => {
-        this.setStatus('simulated');
+      socket.onclose = (ev) => {
+        if (this.ws !== socket) return;
+        this.ws = null;
+        const hint = this.isLoopbackUrl(target)
+          ? 'Không kết nối được tới ' + target + '. Kiểm tra: (1) đã chạy "node server.js" trên CÙNG máy với trình duyệt này chưa; (2) nếu mở game từ GitHub Pages, Chrome cần được cấp quyền "Mạng cục bộ" cho trang; (3) TikTok LIVE Studio / OBS có thể chặn localhost, khi đó hãy chạy game bằng "npm run dev" và mở http://localhost:3000/?obs=1.'
+          : 'Không kết nối được tới ' + target + ' (mã đóng ' + ev.code + ').';
+        // Trước khi từng mở được: giữ trạng thái lỗi để người dùng thấy lý do
+        this.setStatus(everOpened ? 'simulated' : 'error', everOpened ? 'Mất kết nối, đang thử lại...' : hint);
         if (this.shouldReconnectWs && this.lastWsUrl) {
           if (this.reconnectWsTimer) clearTimeout(this.reconnectWsTimer);
+          this.reconnectAttempts += 1;
+          // Giãn dần thời gian thử lại: 3s, 6s, ... tối đa 15s
+          const delay = Math.min(15000, 3000 * this.reconnectAttempts);
+          // Luân phiên localhost <-> 127.0.0.1 để tránh lỗi phân giải IPv6
+          let nextUrl = this.lastWsUrl;
+          if (this.reconnectAttempts % 2 === 1 && /\/\/localhost(:|\/|$)/.test(nextUrl)) {
+            nextUrl = nextUrl.replace('//localhost', '//127.0.0.1');
+          } else if (this.reconnectAttempts % 2 === 0 && /\/\/127\.0\.0\.1(:|\/|$)/.test(nextUrl)) {
+            nextUrl = nextUrl.replace('//127.0.0.1', '//localhost');
+          }
           this.reconnectWsTimer = setTimeout(() => {
-            this.connectWebSocket(this.lastWsUrl);
-          }, 4000);
+            this.lastWsUrl = nextUrl;
+            this.connectWebSocket(nextUrl, true);
+          }, delay);
         }
       };
 
       socket.onerror = () => {
-        this.setStatus('error');
+        // onclose luôn chạy ngay sau onerror và sẽ ghi chi tiết lỗi
+        if (this.ws !== socket) return;
+        this.statusDetail = 'Đang xử lý lỗi kết nối...';
       };
-    } catch {
-      this.setStatus('error');
+    } catch (e: any) {
+      this.setStatus('error', 'Không thể tạo WebSocket: ' + (e?.message || e));
     }
   }
 }
