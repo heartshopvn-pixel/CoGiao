@@ -56,7 +56,7 @@ export const ZombieCharacterSprite: React.FC<ZombieCharacterSpriteProps> = ({
         style={{
           transform: `rotate(${rotationDeg}deg) scaleX(${zombie.facing === 'left' ? -1 : 1})`,
           filter: isHit
-            ? 'brightness(2.1) saturate(2.2) drop-shadow(0 0 12px rgba(2ef, 68, 68, 0.95))'
+            ? 'brightness(2.1) saturate(2.2) drop-shadow(0 0 12px rgba(239, 68, 68, 0.95))'
             : 'drop-shadow(0 6px 10px rgba(0,0,0,0.65))',
         }}
       >

@@ -271,9 +271,9 @@ export const StudentSprite: React.FC<StudentSpriteProps> = ({
       pilgrim.state === 'walk_to_teacher_gift' ||
       pilgrim.state === 'throw_flower_at_teacher');
 
-  // 2.5D Depth Y-Sorting: Thân nhân vật luôn giữ nguyên zIndex theo tọa độ độ sâu Y thực tế trong lớp học
-  // (bạn ngồi bàn sau Y lớn luôn đè lên bạn ngồi bàn trước Y nhỏ; khi chat/đọc TTS chỉ đẩy Thẻ tên & Bong bóng chat lên tầng nổi)
-  const depthY = isRichKidDancing ? effectiveBaseY + 2 : renderedY;
+  // 2.5D Depth Y-Sorting: Thân nhân vật luôn giữ nguyên zIndex theo tọa độ độ sâu Y thực tế của bàn học (effectiveBaseY)
+  // (bạn ngồi bàn sau Y lớn luôn đè lên bạn ngồi bàn trước Y nhỏ; hai bạn cùng bàn có cùng tầng sâu và luôn đứng trước mặt bàn của chính mình)
+  const depthY = isRichKidDancing ? effectiveBaseY + 2 : effectiveBaseY;
   const bodyZIndex = Math.max(
     22,
     Math.round(depthY) + (isSeated || isAtDeskSeat ? 0 : 2)

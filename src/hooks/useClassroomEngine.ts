@@ -333,11 +333,23 @@ export function useClassroomEngine() {
           const hasNewGiftGuide =
             Array.isArray(savedGuideItems) &&
             savedGuideItems.some((it: { id?: string }) => it.id === 'pig' || it.id === 'vip');
+          const savedCats = parsed.config.npcSpeechCategories;
           return {
             ...DEFAULT_CONFIG,
             ...parsed.config,
             spawnPoint: LEFT_DOOR_POS,
             exitPoint: LEFT_DOOR_POS,
+            npcSpeechCategories: {
+              idle: Array.isArray(savedCats?.idle)
+                ? savedCats.idle
+                : DEFAULT_NPC_SPEECH_CATEGORIES.idle,
+              question: Array.isArray(savedCats?.question)
+                ? savedCats.question
+                : DEFAULT_NPC_SPEECH_CATEGORIES.question,
+              reply: Array.isArray(savedCats?.reply)
+                ? savedCats.reply
+                : DEFAULT_NPC_SPEECH_CATEGORIES.reply,
+            },
             giftModelScales: {
               ...DEFAULT_GIFT_MODEL_SCALES,
               ...(parsed.config.giftModelScales || {}),
@@ -359,18 +371,34 @@ export function useClassroomEngine() {
     return DEFAULT_CONFIG;
   });
 
-  const [vipSlots, setVipSlots] = useState<KneelSlot[]>(() => []);
+  const [vipSlots, setVipSlots] = useState<KneelSlot[]>(() => {
+    try {
+      const saved = localStorage.getItem(STORAGE_KEY);
+      if (saved) {
+        const parsed = JSON.parse(saved);
+        if (Array.isArray(parsed.vipSlots) && parsed.vipSlots.length > 0) {
+          return parsed.vipSlots.map((s: KneelSlot, idx: number) => ({
+            ...s,
+            id: s.id || `vip-${idx}`,
+            isVip: true,
+            occupiedById: null,
+          }));
+        }
+      }
+    } catch {
+      // Ignore
+    }
+    return [];
+  });
 
   const [normalSlots, setNormalSlots] = useState<KneelSlot[]>(() => {
     try {
       const saved = localStorage.getItem(STORAGE_KEY);
       if (saved) {
         const parsed = JSON.parse(saved);
-        const savedVip = Array.isArray(parsed.vipSlots) ? parsed.vipSlots : [];
         const savedNorm = Array.isArray(parsed.normalSlots) ? parsed.normalSlots : [];
-        const merged = [...savedVip, ...savedNorm];
-        if (merged.length > 0) {
-          return merged.map((s: KneelSlot, idx: number) => ({
+        if (savedNorm.length > 0) {
+          return savedNorm.map((s: KneelSlot, idx: number) => ({
             ...s,
             id: s.id || `norm-${idx}`,
             isVip: false,
@@ -383,21 +411,80 @@ export function useClassroomEngine() {
     }
     return INITIAL_NORMAL_SLOTS;
   });
+
+  const [npcNames, setNpcNames] = useState<string[]>(() => {
+    try {
+      const saved = localStorage.getItem(STORAGE_KEY);
+      if (saved) {
+        const parsed = JSON.parse(saved);
+        if (Array.isArray(parsed.npcNames) && parsed.npcNames.length > 0) {
+          return parsed.npcNames;
+        }
+      }
+    } catch {
+      // Ignore
+    }
+    return SAMPLE_NAMES;
+  });
+
+  const [npcPrayers, setNpcPrayers] = useState<string[]>(() => {
+    try {
+      const saved = localStorage.getItem(STORAGE_KEY);
+      if (saved) {
+        const parsed = JSON.parse(saved);
+        if (Array.isArray(parsed.npcPrayers) && parsed.npcPrayers.length > 0) {
+          return parsed.npcPrayers;
+        }
+      }
+    } catch {
+      // Ignore
+    }
+    return SAMPLE_PRAYERS;
+  });
+
+  const [npcAvatars, setNpcAvatars] = useState<string[]>(() => {
+    try {
+      const saved = localStorage.getItem(STORAGE_KEY);
+      if (saved) {
+        const parsed = JSON.parse(saved);
+        if (Array.isArray(parsed.npcAvatars) && parsed.npcAvatars.length > 0) {
+          return parsed.npcAvatars;
+        }
+      }
+    } catch {
+      // Ignore
+    }
+    return DEFAULT_NPC_AVATARS;
+  });
+
   const [pilgrims, setPilgrims] = useState<PilgrimData[]>([]);
   const [doorCrowd, setDoorCrowd] = useState<PilgrimData[]>(() =>
     buildDoorCrowdPool(
       config.doorCrowdCount ?? 7,
       config.doorCrowdPos || { x: 46, y: 506 },
       [],
-      SAMPLE_NAMES,
-      DEFAULT_NPC_AVATARS,
+      npcNames,
+      npcAvatars,
       config.doorCrowdSpread ?? 1
     )
   );
   const [controlledNpcRole, setControlledNpcRole] =
     useState<ControlledNpcRole>(null);
   const [monks, setMonks] = useState<TempleMonkData[]>(INITIAL_MONKS);
-  const [lotusDonors, setLotusDonors] = useState<DonorEntry[]>(INITIAL_DONORS);
+  const [lotusDonors, setLotusDonors] = useState<DonorEntry[]>(() => {
+    try {
+      const saved = localStorage.getItem(STORAGE_KEY);
+      if (saved) {
+        const parsed = JSON.parse(saved);
+        if (Array.isArray(parsed.lotusDonors)) {
+          return parsed.lotusDonors;
+        }
+      }
+    } catch {
+      // Ignore
+    }
+    return INITIAL_DONORS;
+  });
   const [floatingToasts, setFloatingToasts] = useState<FloatingToastItem[]>([]);
   const [customAssets, setCustomAssets] = useState<CustomAssetsConfig>(DEFAULT_SPRITESHEETS);
 
@@ -483,14 +570,48 @@ export function useClassroomEngine() {
   });
   const [cameraQueue, setCameraQueue] = useState<CameraQueueItem[]>([]);
 
-  const [npcNames, setNpcNames] = useState<string[]>(SAMPLE_NAMES);
-  const [npcPrayers, setNpcPrayers] = useState<string[]>(SAMPLE_PRAYERS);
-  const [npcAvatars, setNpcAvatars] = useState<string[]>(DEFAULT_NPC_AVATARS);
-
-  const [safetyActionMode, setSafetyActionMode] = useState<SafetyActionMode>('purify');
-  const [safetyCategories, setSafetyCategories] = useState<SafetyCategory[]>(
-    INITIAL_SAFETY_CATEGORIES
-  );
+  const [safetyActionMode, setSafetyActionMode] = useState<SafetyActionMode>(() => {
+    try {
+      const saved = localStorage.getItem(STORAGE_KEY);
+      if (saved) {
+        const parsed = JSON.parse(saved);
+        if (
+          parsed.safetyActionMode === 'purify' ||
+          parsed.safetyActionMode === 'block' ||
+          parsed.safetyActionMode === 'mask'
+        ) {
+          return parsed.safetyActionMode;
+        }
+      }
+    } catch {
+      // Ignore
+    }
+    return 'purify';
+  });
+  const [safetyCategories, setSafetyCategories] = useState<SafetyCategory[]>(() => {
+    try {
+      const saved = localStorage.getItem(STORAGE_KEY);
+      if (saved) {
+        const parsed = JSON.parse(saved);
+        if (Array.isArray(parsed.safetyCategories) && parsed.safetyCategories.length > 0) {
+          const enabledMap = new Map<string, boolean>();
+          parsed.safetyCategories.forEach((c: { key?: string; enabled?: boolean }) => {
+            if (c && typeof c.key === 'string' && typeof c.enabled === 'boolean') {
+              enabledMap.set(c.key, c.enabled);
+            }
+          });
+          return INITIAL_SAFETY_CATEGORIES.map((cat) =>
+            enabledMap.has(cat.key)
+              ? { ...cat, enabled: enabledMap.get(cat.key)! }
+              : cat
+          );
+        }
+      }
+    } catch {
+      // Ignore
+    }
+    return INITIAL_SAFETY_CATEGORIES;
+  });
   const [customWords, setCustomWords] = useState<string[]>(() =>
     loadSavedCustomWords()
   );
@@ -1084,7 +1205,7 @@ export function useClassroomEngine() {
     timer: null,
   });
 
-  // Load saved custom assets from IndexedDB (fallback customBgUrl & deskModelUrl to DEFAULT_SPRITESHEETS)
+  // Load saved custom assets & full studio state (including large Base64 MP3s / NPC avatars / NPC lists) from IndexedDB
   useEffect(() => {
     idbGet<Partial<CustomAssetsConfig>>('classroom_custom_assets_v1').then((saved) => {
       if (saved) {
@@ -1106,22 +1227,256 @@ export function useClassroomEngine() {
         }));
       }
     });
+
+    idbGet<{
+      config?: Partial<GameConfig>;
+      vipSlots?: KneelSlot[];
+      normalSlots?: KneelSlot[];
+      npcNames?: string[];
+      npcPrayers?: string[];
+      npcAvatars?: string[];
+      safetyActionMode?: SafetyActionMode;
+      safetyCategories?: SafetyCategory[];
+      lotusDonors?: DonorEntry[];
+    }>('classroom_full_studio_state_v1').then((savedFull) => {
+      if (!savedFull) return;
+      if (savedFull.config) {
+        setConfig((prev) => ({
+          ...prev,
+          ...savedFull.config,
+          spawnPoint: LEFT_DOOR_POS,
+          exitPoint: LEFT_DOOR_POS,
+          npcSpeechCategories: {
+            idle: Array.isArray(savedFull.config?.npcSpeechCategories?.idle)
+              ? savedFull.config!.npcSpeechCategories!.idle
+              : prev.npcSpeechCategories?.idle ?? DEFAULT_NPC_SPEECH_CATEGORIES.idle,
+            question: Array.isArray(savedFull.config?.npcSpeechCategories?.question)
+              ? savedFull.config!.npcSpeechCategories!.question
+              : prev.npcSpeechCategories?.question ?? DEFAULT_NPC_SPEECH_CATEGORIES.question,
+            reply: Array.isArray(savedFull.config?.npcSpeechCategories?.reply)
+              ? savedFull.config!.npcSpeechCategories!.reply
+              : prev.npcSpeechCategories?.reply ?? DEFAULT_NPC_SPEECH_CATEGORIES.reply,
+          },
+          giftModelScales: {
+            ...DEFAULT_GIFT_MODEL_SCALES,
+            ...(prev.giftModelScales || {}),
+            ...(savedFull.config?.giftModelScales || {}),
+          },
+          grid: {
+            ...prev.grid,
+            ...(savedFull.config?.grid || {}),
+          },
+          hudLayout: {
+            ...prev.hudLayout,
+            ...(savedFull.config?.hudLayout || {}),
+          },
+        }));
+      }
+      if (Array.isArray(savedFull.npcNames) && savedFull.npcNames.length > 0) {
+        setNpcNames(savedFull.npcNames);
+      }
+      if (Array.isArray(savedFull.npcPrayers) && savedFull.npcPrayers.length > 0) {
+        setNpcPrayers(savedFull.npcPrayers);
+      }
+      if (Array.isArray(savedFull.npcAvatars) && savedFull.npcAvatars.length > 0) {
+        setNpcAvatars(savedFull.npcAvatars);
+      }
+      if (
+        savedFull.safetyActionMode === 'purify' ||
+        savedFull.safetyActionMode === 'block' ||
+        savedFull.safetyActionMode === 'mask'
+      ) {
+        setSafetyActionMode(savedFull.safetyActionMode);
+      }
+      if (
+        Array.isArray(savedFull.safetyCategories) &&
+        savedFull.safetyCategories.length > 0
+      ) {
+        const enabledMap = new Map<string, boolean>();
+        savedFull.safetyCategories.forEach((c) => {
+          if (c && typeof c.key === 'string' && typeof c.enabled === 'boolean') {
+            enabledMap.set(c.key, c.enabled);
+          }
+        });
+        setSafetyCategories(
+          INITIAL_SAFETY_CATEGORIES.map((cat) =>
+            enabledMap.has(cat.key)
+              ? { ...cat, enabled: enabledMap.get(cat.key)! }
+              : cat
+          )
+        );
+      }
+      if (Array.isArray(savedFull.lotusDonors)) {
+        setLotusDonors(savedFull.lotusDonors);
+      }
+    });
   }, []);
 
-  // Save config & desk positions to localStorage
+  // Đồng bộ ngay tên và avatar của NPC đang ở cửa lớp (doorCrowd), trong lớp (pilgrims isBot) và trong hàng chờ (waitingPoolRef isBot) khi danh sách npcNames / npcAvatars thay đổi
   useEffect(() => {
+    const safeNames = npcNames.length > 0 ? npcNames : SAMPLE_NAMES;
+    const safeAvatars = npcAvatars.length > 0 ? npcAvatars : DEFAULT_NPC_AVATARS;
+    const validNameSet = new Set(safeNames.map((n) => n.trim().toLowerCase()));
+
+    setDoorCrowd((prev) => {
+      let changed = false;
+      const next = prev.map((d, idx) => {
+        if (!d.isBot) return d;
+        const lower = d.username.trim().toLowerCase();
+        if (!validNameSet.has(lower)) {
+          changed = true;
+          const nextName = safeNames[idx % safeNames.length];
+          return {
+            ...d,
+            username: nextName,
+            gender: detectVietnameseGender(nextName),
+          };
+        }
+        return d;
+      });
+      if (changed) {
+        doorCrowdRef.current = next;
+        return next;
+      }
+      return prev;
+    });
+
+    setPilgrims((prev) => {
+      let changed = false;
+      const next = prev.map((p, idx) => {
+        if (!p.isBot) return p;
+        const lower = p.username.trim().toLowerCase();
+        if (!validNameSet.has(lower)) {
+          changed = true;
+          const nextName = safeNames[idx % safeNames.length];
+          return {
+            ...p,
+            username: nextName,
+            gender: detectVietnameseGender(nextName),
+          };
+        }
+        return p;
+      });
+      if (changed) {
+        pilgrimsRef.current = next;
+        return next;
+      }
+      return prev;
+    });
+
+    let changedQueueBot = false;
+    const nextPool = new Map<string, QueuedPilgrimRequest>();
+    let qIdx = 0;
+    waitingPoolRef.current.forEach((item, key) => {
+      if (item.isBot && !validNameSet.has(item.username.trim().toLowerCase())) {
+        changedQueueBot = true;
+        const nextName = safeNames[qIdx % safeNames.length];
+        const nextLower = nextName.trim().toLowerCase();
+        if (!nextPool.has(nextLower)) {
+          nextPool.set(nextLower, {
+            ...item,
+            username: nextName,
+            gender: detectVietnameseGender(nextName),
+            avatarUrl: item.avatarUrl || safeAvatars[qIdx % safeAvatars.length],
+          });
+        }
+      } else {
+        nextPool.set(key, item);
+      }
+      qIdx++;
+    });
+    if (changedQueueBot) {
+      waitingPoolRef.current = nextPool;
+      const allQueued = Array.from(nextPool.values());
+      allQueued.sort((a, b) => {
+        if (Boolean(a.isGoldenPriority) !== Boolean(b.isGoldenPriority)) {
+          return a.isGoldenPriority ? -1 : 1;
+        }
+        return (b.points || 0) - (a.points || 0);
+      });
+      const top15 = allQueued.slice(0, 15).map((item, i) => ({
+        ...item,
+        rank: i + 1,
+      }));
+      waitingQueueRef.current = top15;
+      setWaitingQueue(top15);
+      setQueueCount(nextPool.size);
+    }
+  }, [npcNames, npcAvatars]);
+
+  // Save full studio state (config, desk positions, NPC lists, safety settings, scoreboard) to both IndexedDB & localStorage
+  useEffect(() => {
+    const cleanVip = vipSlots.map((s) => ({ ...s, occupiedById: null }));
+    const cleanNorm = normalSlots.map((s) => ({ ...s, occupiedById: null }));
+    const fullPayload = {
+      config,
+      vipSlots: cleanVip,
+      normalSlots: cleanNorm,
+      npcNames,
+      npcPrayers,
+      npcAvatars,
+      safetyActionMode,
+      safetyCategories,
+      lotusDonors,
+    };
+
+    // 1. Lưu đầy đủ 100% (kể cả MP3 Base64 & Avatar Base64 dung lượng lớn) vào IndexedDB
+    void idbSet('classroom_full_studio_state_v1', fullPayload);
+
+    // 2. Lưu vào localStorage để khởi tạo đồng bộ tức thì khi F5 (nếu vượt quá 5MB do MP3 Base64 thì tự động lược bỏ chuỗi audio data: trong bản localStorage)
     try {
-      const cleanVip = vipSlots.map((s) => ({ ...s, occupiedById: null }));
-      const cleanNorm = normalSlots.map((s) => ({ ...s, occupiedById: null }));
-      localStorage.setItem(
-        STORAGE_KEY,
-        JSON.stringify({ config, vipSlots: cleanVip, normalSlots: cleanNorm })
-      );
+      localStorage.setItem(STORAGE_KEY, JSON.stringify(fullPayload));
     } catch {
-      // Ignore
+      try {
+        const lightConfig: GameConfig = {
+          ...config,
+          bellMp3Url:
+            config.bellMp3Url && config.bellMp3Url.length > 10000
+              ? null
+              : config.bellMp3Url,
+          woodenFishMp3Url:
+            config.woodenFishMp3Url && config.woodenFishMp3Url.length > 10000
+              ? null
+              : config.woodenFishMp3Url,
+          answerRevealMp3Url:
+            config.answerRevealMp3Url && config.answerRevealMp3Url.length > 10000
+              ? null
+              : config.answerRevealMp3Url,
+          zombieGrowlMp3Url:
+            config.zombieGrowlMp3Url && config.zombieGrowlMp3Url.length > 10000
+              ? null
+              : config.zombieGrowlMp3Url,
+          giftSoundMp3Urls: {},
+          bgmTracks: (config.bgmTracks || []).map((t) =>
+            t.url && t.url.length > 10000 ? { ...t, url: '' } : t
+          ),
+        };
+        const lightAvatars = npcAvatars.filter((a) => !a || a.length < 25000);
+        localStorage.setItem(
+          STORAGE_KEY,
+          JSON.stringify({
+            ...fullPayload,
+            config: lightConfig,
+            npcAvatars:
+              lightAvatars.length > 0 ? lightAvatars : DEFAULT_NPC_AVATARS,
+          })
+        );
+      } catch {
+        // Ignore
+      }
     }
     soundEngine.syncConfig(config);
-  }, [config, vipSlots, normalSlots]);
+  }, [
+    config,
+    vipSlots,
+    normalSlots,
+    npcNames,
+    npcPrayers,
+    npcAvatars,
+    safetyActionMode,
+    safetyCategories,
+    lotusDonors,
+  ]);
 
   // Subscribe to soundEngine statuses (Tắt hoàn toàn chatbox tự động của Cô Giáo khi đọc TTS; chatbox Cô/Thầy chỉ hiện khi cảm ơn quà)
   useEffect(() => {
@@ -1164,14 +1519,23 @@ export function useClassroomEngine() {
                 p.username.trim().toLowerCase() === lowerUser &&
                 p.state !== 'leave_down_exit'
             );
-          if (target) {
-            setCameraFocus({
-              pilgrimId: target.id,
-              username: target.username,
-              reason: meta.reason || 'comment',
-              isBot: meta.isBot,
-              startedAt: Date.now(),
-              until: Date.now() + 18000,
+          if (target && !zombieEventStateRef.current.isActive) {
+            setCameraFocus((prev) => {
+              const nowLock = Date.now();
+              if (
+                prev.focusRole &&
+                nowLock < Math.max(prev.until || 0, prev.lockedUntil || 0)
+              ) {
+                return prev;
+              }
+              return {
+                pilgrimId: target.id,
+                username: target.username,
+                reason: meta.reason || 'comment',
+                isBot: meta.isBot,
+                startedAt: nowLock,
+                until: nowLock + 18000,
+              };
             });
           }
         }
@@ -5884,8 +6248,8 @@ export function useClassroomEngine() {
         bState.isRunning &&
         bState.phase === 'asking';
 
-      // Khi đang trong thời gian trả lời câu hỏi trên bảng, NPC chỉ tập trung trả lời câu hỏi (đúng / im lặng / đảo 2 chữ cái)
-      if (isQuizAsking) {
+      // Khi đang trong thời gian trả lời câu hỏi trên bảng hoặc đang diễn ra Sự kiện Đẩy lùi Zombie, tạm dừng rải chat ngẫu nhiên của NPC
+      if (isQuizAsking || zombieEventStateRef.current.isActive) {
         return;
       }
 
@@ -8147,6 +8511,33 @@ export function useClassroomEngine() {
         case 'TRIGGER_ZOMBIE_EVENT':
           startZombieEventFlowNow(Boolean(p.wasRunningLesson));
           break;
+        case 'UPDATE_NPC_LISTS':
+          if (Array.isArray(p.npcNames) && p.npcNames.length > 0) {
+            setNpcNames(p.npcNames);
+          }
+          if (Array.isArray(p.npcPrayers) && p.npcPrayers.length > 0) {
+            setNpcPrayers(p.npcPrayers);
+          }
+          if (Array.isArray(p.npcAvatars) && p.npcAvatars.length > 0) {
+            setNpcAvatars(p.npcAvatars);
+          }
+          break;
+        case 'UPDATE_SAFETY':
+          if (
+            p.safetyActionMode === 'purify' ||
+            p.safetyActionMode === 'block' ||
+            p.safetyActionMode === 'mask'
+          ) {
+            setSafetyActionMode(p.safetyActionMode);
+          }
+          if (Array.isArray(p.safetyCategories) && p.safetyCategories.length > 0) {
+            setSafetyCategories(p.safetyCategories);
+          }
+          if (Array.isArray(p.customWords)) {
+            setCustomWords(p.customWords);
+            saveCustomWordsToStorage(p.customWords);
+          }
+          break;
         case 'TRIGGER_CLASSROOM_GIFT':
           handleTriggerClassroomGift({
             username: p.username,
@@ -9447,6 +9838,10 @@ export function useClassroomEngine() {
       normalSlots: normalSlotsRef.current,
       npcNames: npcNamesRef.current,
       npcPrayers: npcPrayersRef.current,
+      npcAvatars: npcAvatarsRef.current,
+      safetyActionMode,
+      safetyCategories,
+      customWords,
     };
     const blob = new Blob([JSON.stringify(data, null, 2)], {
       type: 'application/json',
@@ -9457,7 +9852,7 @@ export function useClassroomEngine() {
     a.download = `lop-hoc-12a1-backup-${Date.now()}.json`;
     a.click();
     URL.revokeObjectURL(url);
-  }, []);
+  }, [customWords, safetyActionMode, safetyCategories]);
 
   const handleLoadBackupJson = useCallback(
     (rawJsonText: string): { ok: boolean; message: string } => {
@@ -9467,9 +9862,9 @@ export function useClassroomEngine() {
         let nextVip = vipSlotsRef.current;
         let nextNorm = normalSlotsRef.current;
 
-        if (Array.isArray(parsed.vipSlots) && parsed.vipSlots.length > 0) {
+        if (Array.isArray(parsed.vipSlots)) {
           nextVip = parsed.vipSlots.map((s: KneelSlot, i: number) => ({
-            ...INITIAL_VIP_SLOTS[i % INITIAL_VIP_SLOTS.length],
+            ...(INITIAL_VIP_SLOTS[i % Math.max(1, INITIAL_VIP_SLOTS.length)] || {}),
             ...s,
             isVip: true,
             occupiedById: null,
@@ -9504,6 +9899,23 @@ export function useClassroomEngine() {
         }
         if (Array.isArray(parsed.npcAvatars) && parsed.npcAvatars.length > 0) {
           setNpcAvatars(parsed.npcAvatars);
+        }
+        if (
+          parsed.safetyActionMode === 'purify' ||
+          parsed.safetyActionMode === 'block' ||
+          parsed.safetyActionMode === 'mask'
+        ) {
+          setSafetyActionMode(parsed.safetyActionMode);
+        }
+        if (
+          Array.isArray(parsed.safetyCategories) &&
+          parsed.safetyCategories.length > 0
+        ) {
+          setSafetyCategories(parsed.safetyCategories);
+        }
+        if (Array.isArray(parsed.customWords) && parsed.customWords.length > 0) {
+          setCustomWords(parsed.customWords);
+          saveCustomWordsToStorage(parsed.customWords);
         }
         return { ok: true, message: 'Đã nạp cấu hình lớp học thành công!' };
       } catch {
@@ -9579,11 +9991,21 @@ export function useClassroomEngine() {
       vipSlots: vipSlotsRef.current,
       normalSlots: normalSlotsRef.current,
     });
+    syncService.sendCommand('UPDATE_NPC_LISTS', {
+      npcNames: npcNamesRef.current,
+      npcPrayers: npcPrayersRef.current,
+      npcAvatars: npcAvatarsRef.current,
+    });
+    syncService.sendCommand('UPDATE_SAFETY', {
+      safetyActionMode,
+      safetyCategories,
+      customWords,
+    });
     pushToast(
-      '✅ Đã đồng bộ cấu hình Dev, HUD & vị trí bàn ghế sang Live (Giữ nguyên tiến trình & bảng điểm Live)',
+      '✅ Đã đồng bộ cấu hình Dev, HUD, danh sách NPC & vị trí bàn ghế sang Live (Giữ nguyên tiến trình & bảng điểm Live)',
       false
     );
-  }, [pushToast]);
+  }, [customWords, pushToast, safetyActionMode, safetyCategories]);
 
   // Nút điều khiển NPC & Safety
   const handleUpdateNpcNames = useCallback((list: string[]) => {
@@ -9865,6 +10287,12 @@ export function useClassroomEngine() {
       setClassBoardState(resumedBoard);
       syncService.sendCommand('SYNC_CLASS_BOARD_STATE', { state: resumedBoard });
     }
+    if (zombieHeartBatchRef.current.timer) {
+      clearTimeout(zombieHeartBatchRef.current.timer);
+      zombieHeartBatchRef.current.timer = null;
+    }
+    zombieHeartBatchRef.current.seatedByUser.clear();
+    zombieHeartBatchRef.current.queueByUser.clear();
     pushToast('⏹️ Đã kết thúc Sự kiện Zombie, tiếp tục tiết học!', false);
   }, [pushToast]);
 
