@@ -10,6 +10,7 @@ import {
   GridConfig,
   GuideTaskItem,
   KneelSlot,
+  NpcSpeechCategoriesConfig,
   OfferingGiftType,
   RectBounds,
   TempleMonkData,
@@ -70,7 +71,7 @@ export const DEFAULT_GIFT_MODEL_SCALES: GiftModelScalesConfig = {
   roseBouquet: 1.0,
   deskCat: 1.0,
   snackBag: 1.0,
-  pcGamingDesk: 1.0,
+  pcGamingDesk: 1.25,
   runningPig: 1.0,
   fallingMoney: 1.0,
   deskCatOffsetX: 0,
@@ -775,6 +776,33 @@ export const INITIAL_VIP_SLOTS: KneelSlot[] = BUILT_INITIAL_SLOTS.vipSlots;
 
 export const INITIAL_NORMAL_SLOTS: KneelSlot[] = BUILT_INITIAL_SLOTS.normalSlots;
 
+export const DEFAULT_NPC_SPEECH_CATEGORIES: NpcSpeechCategoriesConfig = {
+  idle: [
+    'Chúc cả lớp 12A1 kỳ thi THPT Quốc gia đạt toàn điểm 10!',
+    'Ước gì đề thi học kỳ năm nay trúng tủ 100% luôn!',
+    'Cô giảng bài dễ hiểu quá, em hiểu hết công thức rồi ạ ❤️',
+    'Cả lớp cố lên, sắp tới giờ ra chơi liên hoan trà sữa rồi!',
+    'Em xin tặng cô bông Hoa Điểm 10 tươi thắm nhất ạ 🌺',
+    'Hôm nay trời đẹp quá, ngồi học mà cứ ngắm hoa phượng ngoài sân!',
+  ],
+  question: [
+    'Cô ơi tiết sau lớp mình có kiểm tra 15 phút không ạ?',
+    'Bạn ơi câu này chọn đáp án nào thế, chỉ mình với?',
+    'Cậu có mang dư cây bút bi nào không cho tớ mượn với?',
+    'Ra chơi có ai đi uống trà sữa trân châu đường đen cùng mình không?',
+    'Bài tập về nhà trang mấy thế cậu ơi?',
+    'Cậu hiểu công thức cô vừa viết trên bảng chưa?',
+  ],
+  reply: [
+    'Mình chọn đáp án A nha, chắc chắn đúng luôn!',
+    'Đợi xíu mình chỉ cho, câu này dễ lắm!',
+    'Có nè, lấy bút trong hộp bút của mình mà dùng đi!',
+    'Ok luôn, hết tiết ra căng tin mình bao trà sữa nhé!',
+    'Suỵt trật tự nghe cô Thảo giảng bài đi cậu ơi 😄',
+    'Mình làm xong hết rồi, lát ra chơi mình giảng lại cho!',
+  ],
+};
+
 export const DEFAULT_CONFIG: GameConfig = {
   ttsEnabled: true,
   ttsVipOnly: false,
@@ -878,6 +906,7 @@ export const DEFAULT_CONFIG: GameConfig = {
     'Bạn nào trả lời nhanh nhất câu này sẽ được cộng nhiều điểm lắm nha!',
   ],
   lessonAnswerTtsTemplate: 'Đáp án là',
+  lessonFlow4PostTtsDelaySec: 1,
   quizResultTtsEnabled: true,
   quizResultTtsTemplate:
     'Có [HọcKé] bạn học ké và [TrongLớp] bạn trong lớp trả lời đúng, chúc mừng bạn [Top1] trả lời nhanh nhất!',
@@ -974,6 +1003,7 @@ export const DEFAULT_CONFIG: GameConfig = {
   botVipPercent: 0,
   npcCorrectAnswerPercent: 65,
   npcScatterChatDensity: 50,
+  npcSpeechCategories: DEFAULT_NPC_SPEECH_CATEGORIES,
   npcSpawnIntervalSec: 2.5,
   npcPrayIntervalSec: 6.5,
   prayDurationSec: 24,
@@ -1428,16 +1458,9 @@ export const SAMPLE_NAMES = [
 ];
 
 export const SAMPLE_PRAYERS = [
-  'Thưa cô em xin phép xung phong lên bảng giải bài tập này ạ! ✋',
-  'Cô ơi tiết sau lớp mình có kiểm tra 15 phút không ạ?',
-  'Chúc cả lớp 12A1 kỳ thi THPT Quốc gia đạt toàn điểm 10!',
-  'Em thưa cô đáp án câu này là phương án A ạ!',
-  'Bạn ngồi cạnh em cứ nhìn bài của em cô ơi 😄',
-  'Ước gì đề thi học kỳ năm nay trúng tủ 100% luôn!',
-  'Thưa cô cho em xin phép phát biểu xây dựng bài ạ!',
-  'Cô giảng bài dễ hiểu quá, em hiểu hết công thức rồi ạ ❤️',
-  'Cả lớp cố lên, sắp tới giờ ra chơi liên hoan trà sữa rồi!',
-  'Em xin tặng cô bông Hoa Điểm 10 tươi thắm nhất ạ 🌺',
+  ...DEFAULT_NPC_SPEECH_CATEGORIES.idle,
+  ...DEFAULT_NPC_SPEECH_CATEGORIES.question,
+  ...DEFAULT_NPC_SPEECH_CATEGORIES.reply,
 ];
 
 export const NODE_SERVER_CODE = `// File: server.js (Bridge TikTok Live + Giọng đọc AI Đa Luồng cho Lớp Học Cấp 3 Live)

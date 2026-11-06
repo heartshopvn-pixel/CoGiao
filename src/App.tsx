@@ -38,20 +38,20 @@ export default function App() {
     <div className="h-screen w-screen flex flex-row items-stretch justify-between bg-stone-950 overflow-hidden relative">
       {/* Minimal Floating Trigger ONLY when Dev Studio is hidden and not in ?obs=1 pure mode */}
       {!studioOpen && !isPureStreamMode && (
-        <div className="fixed top-3 right-3 z-50 flex items-center gap-1.5 opacity-35 hover:opacity-100 transition-opacity">
+        <div className="fixed top-2.5 right-2.5 z-50 flex items-center gap-1 opacity-35 hover:opacity-100 transition-opacity">
           <button
             type="button"
             onClick={engine.handleToggleLocalMute}
-            className="px-2.5 py-1.5 rounded-lg bg-stone-900/95 border border-stone-700 text-xs font-medium text-stone-200 flex items-center gap-1.5 shadow-lg cursor-pointer"
+            className="px-2 py-1 rounded-md bg-stone-900/95 border border-stone-700 text-[10px] font-medium text-stone-200 flex items-center gap-1 shadow-lg cursor-pointer"
           >
             {engine.isLocalTabMuted ? (
               <>
-                <VolumeX className="w-3.5 h-3.5 text-rose-400" />
+                <VolumeX className="w-3 h-3 text-rose-400" />
                 <span>Tab tắt tiếng</span>
               </>
             ) : (
               <>
-                <Volume2 className="w-3.5 h-3.5 text-emerald-400" />
+                <Volume2 className="w-3 h-3 text-emerald-400" />
                 <span>Tab có tiếng</span>
               </>
             )}
@@ -59,9 +59,9 @@ export default function App() {
           <button
             type="button"
             onClick={() => setStudioOpen(true)}
-            className="px-3 py-1.5 rounded-lg bg-stone-900/95 hover:bg-stone-800 border border-amber-500/40 text-xs font-semibold text-amber-300 flex items-center gap-1.5 shadow-lg cursor-pointer"
+            className="px-2.5 py-1 rounded-md bg-stone-900/95 hover:bg-stone-800 border border-amber-500/40 text-[10px] font-semibold text-amber-300 flex items-center gap-1 shadow-lg cursor-pointer"
           >
-            <PanelRightOpen className="w-3.5 h-3.5" />
+            <PanelRightOpen className="w-3 h-3" />
             <span>Mở Studio (F2)</span>
           </button>
         </div>

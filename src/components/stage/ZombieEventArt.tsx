@@ -37,7 +37,7 @@ export const ZombieCharacterSprite: React.FC<ZombieCharacterSpriteProps> = ({
       style={{
         left: `${drawX}px`,
         top: `${drawY}px`,
-        zIndex: Math.floor(zombie.y) + 35,
+        zIndex: Math.max(22, Math.round(zombie.y) + 2),
         transform: `translate(-50%, -100%) scale(${scale})`,
         opacity,
         transition: isDying ? 'opacity 0.15s linear' : undefined,
@@ -199,11 +199,17 @@ export const ZombieCharacterSprite: React.FC<ZombieCharacterSpriteProps> = ({
 interface ZombieProjectileSpriteProps {
   proj: ZombieProjectileFX;
   customAssets?: CustomAssetsConfig;
+  nameTagFontFamily?: string;
+  nameTagScale?: number;
+  nameTagMaxChars?: number;
 }
 
 export const ZombieProjectileSprite: React.FC<ZombieProjectileSpriteProps> = ({
   proj,
   customAssets,
+  nameTagFontFamily = '"Be Vietnam Pro", system-ui, sans-serif',
+  nameTagScale = 1,
+  nameTagMaxChars = 16,
 }) => {
   const [progress, setProgress] = React.useState(0);
 
@@ -308,30 +314,80 @@ export const ZombieProjectileSprite: React.FC<ZombieProjectileSpriteProps> = ({
       );
     }
 
-    // desk_mate: Đứa bàn bên :) (Meme hình học sinh bị ném xoay vòng)
-    if (customAssets?.projDeskMateUrl) {
-      return <img src={customAssets.projDeskMateUrl} alt="Đứa bàn bên" className="w-14 h-14 object-contain" />;
-    }
+    // desk_mate: Đứa bàn bên bị ném xoay vòng — gắn dính bản sao Thẻ tên của bạn bàn bên vào model đạn để xoay cùng nhau
+    const rawSeatmateName = (proj.seatmateName || 'Bạn cùng bàn').trim();
+    const maxNameChars = Math.max(4, nameTagMaxChars || 16);
+    const displaySeatmateName =
+      rawSeatmateName.length > maxNameChars
+        ? `${rawSeatmateName.slice(0, maxNameChars)}…`
+        : rawSeatmateName;
+
     return (
       <div className="relative flex flex-col items-center">
-        <svg width="52" height="52" viewBox="0 0 52 52" fill="none">
-          {/* Tóc */}
-          <path d="M15 14C15 8 20 5 26 5C32 5 37 8 37 14H15Z" fill="#1E293B" />
-          {/* Mặt học sinh hoảng hốt meme :) */}
-          <circle cx="26" cy="18" r="10" fill="#FDE68A" stroke="#1E293B" strokeWidth="2.2" />
-          {/* Mắt chữ O miệng chữ A */}
-          <circle cx="22.5" cy="16.5" r="2" fill="#1E293B" />
-          <circle cx="29.5" cy="16.5" r="2" fill="#1E293B" />
-          <ellipse cx="26" cy="22" rx="3.2" ry="2.5" fill="#EF4444" stroke="#1E293B" strokeWidth="1.5" />
-          {/* Thân áo trắng khăn quàng đỏ vẫy tay */}
-          <rect x="17" y="28" width="18" height="14" rx="4" fill="#F8FAFC" stroke="#1E293B" strokeWidth="2.2" />
-          <path d="M21 28L26 35L31 28" fill="#EF4444" />
-          {/* Tay chân vung vẩy */}
-          <path d="M17 31L7 24M35 31L45 24M21 42L16 50M31 42L36 50" stroke="#1E293B" strokeWidth="3" strokeLinecap="round" />
-        </svg>
-        <span className="-mt-1 px-1.5 py-0.2 rounded bg-fuchsia-600 text-[9px] font-black text-white border border-white shadow">
-          Áaa!! :)
-        </span>
+        {customAssets?.projDeskMateUrl ? (
+          <img
+            src={customAssets.projDeskMateUrl}
+            alt={rawSeatmateName}
+            className="w-14 h-14 object-contain"
+          />
+        ) : (
+          <svg width="52" height="52" viewBox="0 0 52 52" fill="none">
+            {/* Tóc */}
+            <path d="M15 14C15 8 20 5 26 5C32 5 37 8 37 14H15Z" fill="#1E293B" />
+            {/* Mặt học sinh hoảng hốt meme :) */}
+            <circle cx="26" cy="18" r="10" fill="#FDE68A" stroke="#1E293B" strokeWidth="2.2" />
+            {/* Mắt chữ O miệng chữ A */}
+            <circle cx="22.5" cy="16.5" r="2" fill="#1E293B" />
+            <circle cx="29.5" cy="16.5" r="2" fill="#1E293B" />
+            <ellipse cx="26" cy="22" rx="3.2" ry="2.5" fill="#EF4444" stroke="#1E293B" strokeWidth="1.5" />
+            {/* Thân áo trắng khăn quàng đỏ vẫy tay */}
+            <rect x="17" y="28" width="18" height="14" rx="4" fill="#F8FAFC" stroke="#1E293B" strokeWidth="2.2" />
+            <path d="M21 28L26 35L31 28" fill="#EF4444" />
+            {/* Tay chân vung vẩy */}
+            <path d="M17 31L7 24M35 31L45 24M21 42L16 50M31 42L36 50" stroke="#1E293B" strokeWidth="3" strokeLinecap="round" />
+          </svg>
+        )}
+
+        {/* Bản sao Thẻ Tên của bạn bàn bên gắn dính vào model đạn và xoay theo đạn */}
+        <div
+          style={{
+            fontFamily: nameTagFontFamily,
+            transform: `scale(${(nameTagScale || 1).toFixed(2)})`,
+            transformOrigin: '50% 0%',
+          }}
+          className={`-mt-1 h-[20px] pl-0 pr-1.5 py-0 rounded-full flex items-center gap-1 whitespace-nowrap ${
+            proj.seatmateIsGolden
+              ? 'bg-amber-950/95 border border-yellow-300 text-yellow-200 shadow-[0_0_10px_rgba(250,204,21,0.85)]'
+              : proj.seatmateIsVip
+              ? 'bg-amber-950/90 border border-amber-400/80 text-amber-200 shadow-sm'
+              : 'bg-slate-950/85 border border-slate-700/80 text-slate-100 shadow-sm'
+          }`}
+        >
+          {proj.seatmateAvatarUrl ? (
+            <img
+              src={proj.seatmateAvatarUrl}
+              alt=""
+              className="w-4 h-4 rounded-full object-cover border border-white/40 shrink-0 -ml-px"
+            />
+          ) : (
+            <span
+              className="w-4 h-4 rounded-full shrink-0 inline-block border border-white/30 -ml-px"
+              style={{ backgroundColor: proj.seatmateAvatarColor || '#38bdf8' }}
+            />
+          )}
+          <span
+            className={`text-[9.5px] font-bold tracking-tight py-0.5 ${
+              proj.seatmateIsGolden ? 'text-yellow-300 font-black' : ''
+            }`}
+          >
+            {displaySeatmateName}
+          </span>
+          {(proj.seatmateIsVip || proj.seatmateIsGolden) && (
+            <span className="text-[8px] font-extrabold text-yellow-300">
+              {proj.seatmateIsGolden ? '👑' : '★'}
+            </span>
+          )}
+        </div>
       </div>
     );
   };

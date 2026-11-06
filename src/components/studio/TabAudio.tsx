@@ -1736,11 +1736,34 @@ export const TabAudio: React.FC<TabAudioProps> = ({
             />
           </div>
 
-          <div className="flex items-center justify-between gap-2 text-[10px] bg-stone-900/70 px-2 py-1 rounded border border-stone-800/80">
-            <span className="text-stone-400">Thời gian luồng:</span>
-            <span className="font-mono font-bold text-emerald-300">
-              🔒 Tự động: Nói xong chuyển sang Luồng 5
-            </span>
+          <div className="p-2 rounded bg-stone-900/90 border border-emerald-500/30 space-y-1">
+            <div className="flex items-center justify-between text-[10.5px]">
+              <span className="text-emerald-200 font-semibold">
+                ⏳ Thời gian chờ sau khi đọc xong:
+              </span>
+              <span className="font-mono font-bold text-emerald-300">
+                {(config.lessonFlow4PostTtsDelaySec ?? 1).toFixed(1)}s
+              </span>
+            </div>
+            <input
+              type="range"
+              min={0}
+              max={10}
+              step={0.5}
+              value={config.lessonFlow4PostTtsDelaySec ?? 1}
+              onChange={(e) =>
+                onUpdateConfig({
+                  lessonFlow4PostTtsDelaySec: parseFloat(e.target.value),
+                })
+              }
+              className="w-full accent-emerald-400 h-1.5 bg-stone-800 rounded-lg cursor-pointer"
+            />
+            <div className="flex items-center justify-between gap-2 text-[9.5px] text-stone-400 pt-0.5">
+              <span>Tiến trình Luồng 4:</span>
+              <span className="font-mono font-bold text-emerald-300">
+                Đọc xong → Chờ {(config.lessonFlow4PostTtsDelaySec ?? 1).toFixed(1)}s → Sang Luồng 5
+              </span>
+            </div>
           </div>
         </div>
 

@@ -7,6 +7,7 @@ import {
   DEFAULT_GIFT_MODEL_SCALES,
   DEFAULT_GUIDE_ITEMS,
   DEFAULT_NPC_AVATARS,
+  DEFAULT_NPC_SPEECH_CATEGORIES,
   DEFAULT_SPRITESHEETS,
   ENGLISH_QUIZ_QUESTIONS,
   groupSlotsIntoDoubleDesks,
@@ -1643,6 +1644,7 @@ export function useClassroomEngine() {
         const nextBoard: ClassBoardRuntimeState = {
           ...curBoard,
           ttsFinishedForPhase: true,
+          ttsFinishedAtElapsedMs: curBoard.elapsedPhaseMs || 0,
         };
         classBoardStateRef.current = nextBoard;
         setClassBoardState(nextBoard);
@@ -1990,10 +1992,9 @@ export function useClassroomEngine() {
                   hasCombo || (p.comboCount || 0) > 1 ? 3 : 1,
                 flowersThrownCount: 0,
                 flowerBurstsDoneCount: 0,
-                floatingScoreText: `+${bonusPts}đ`,
-                floatingScoreColor: 'gold' as const,
-                floatingScoreUntil: now + 3400,
-                floatingScoreKey: now,
+                pendingFlowerBonusPoints: bonusPts,
+                flowerBonusAwarded: false,
+                floatingScoreUntil: 0,
                 prayer: '',
                 hasComment: false,
                 chatBubbleUntil: 0,
@@ -2008,7 +2009,7 @@ export function useClassroomEngine() {
             hasCombo ? ` • 🔥 COMBO x${comboCount} -> Ném 3 đóa hoa liên tiếp` : ''
           }): ${
             isDeferredFromQueue ? 'Bắt đầu lượt tặng tiếp theo -> ' : ''
-          }+${bonusPts}đ!`,
+          }Đang mang hoa lên tặng (ném trúng +${bonusPts}đ)!`,
           true
         );
         return;
@@ -2459,8 +2460,105 @@ export function useClassroomEngine() {
       const zEnt = zombieEntityRef.current;
       const targetX = zEnt.x + (Math.random() - 0.5) * 18;
       const targetY = zEnt.y - 42 + (Math.random() - 0.5) * 16;
-      const durationMs = opts.kind === 'desk_mate' ? 480 : opts.kind === 'chair' ? 430 : 380;
+      const durationMs = opts.kind === 'desk_mate' ? 920 : opts.kind === 'chair' ? 430 : 380;
       const now = Date.now();
+
+      // Khi ném "Đứa bàn bên" (desk_mate): Tìm bạn ngồi cùng bàn đôi (hoặc bạn kế bên) để copy Thẻ Tên gắn dính vào model đạn xoay theo đạn
+      let seatmateName: string | undefined;
+      let seatmateAvatarUrl: string | null | undefined;
+      let seatmateAvatarColor: string | undefined;
+      let seatmateIsVip: boolean | undefined;
+      let seatmateIsGolden: boolean | undefined;
+
+      if (opts.kind === 'desk_mate') {
+        const attackerLower = (opts.attackerUsername || '').trim().toLowerCase();
+        const activeSeated = pilgrimsRef.current.filter(
+          (p) =>
+            Boolean(p.slotId) &&
+            p.state !== 'leave_side_to_aisle' &&
+            p.state !== 'leave_down_exit'
+        );
+        const attackerSeated = activeSeated.find(
+          (p) => p.username.trim().toLowerCase() === attackerLower
+        );
+
+        let seatmatePilgrim: PilgrimData | undefined;
+        if (attackerSeated && attackerSeated.slotId) {
+          const allDesks = [
+            ...groupSlotsIntoDoubleDesks(vipSlotsRef.current, 'vip'),
+            ...groupSlotsIntoDoubleDesks(normalSlotsRef.current, 'norm'),
+          ];
+          const desk = allDesks.find(
+            (d) =>
+              d.leftSlot.id === attackerSeated.slotId ||
+              d.rightSlot?.id === attackerSeated.slotId
+          );
+          const partnerSlotId = desk
+            ? desk.leftSlot.id === attackerSeated.slotId
+              ? desk.rightSlot?.id
+              : desk.leftSlot.id
+            : undefined;
+          if (partnerSlotId) {
+            seatmatePilgrim = activeSeated.find(
+              (p) => p.id !== attackerSeated.id && p.slotId === partnerSlotId
+            );
+          }
+          // Nếu ghế bên cạnh cùng bàn đang trống -> lấy bạn ngồi bàn gần nhất trong lớp
+          if (!seatmatePilgrim) {
+            const others = activeSeated.filter((p) => p.id !== attackerSeated.id);
+            if (others.length > 0) {
+              others.sort(
+                (a, b) =>
+                  Math.hypot(a.x - attackerSeated.x, a.y - attackerSeated.y) -
+                  Math.hypot(b.x - attackerSeated.x, b.y - attackerSeated.y)
+              );
+              seatmatePilgrim = others[0];
+            }
+          }
+        } else if (activeSeated.length > 0) {
+          const others = activeSeated.filter(
+            (p) => p.username.trim().toLowerCase() !== attackerLower
+          );
+          if (others.length > 0) {
+            seatmatePilgrim = others[Math.floor(Math.random() * others.length)];
+          }
+        }
+
+        if (seatmatePilgrim) {
+          seatmateName = seatmatePilgrim.username;
+          seatmateAvatarUrl = seatmatePilgrim.avatarUrl || null;
+          seatmateAvatarColor = seatmatePilgrim.avatarColor;
+          seatmateIsVip = Boolean(seatmatePilgrim.isVip);
+          seatmateIsGolden = Boolean(
+            seatmatePilgrim.isGoldenPriority ||
+              (seatmatePilgrim.richKidDanceUntil &&
+                seatmatePilgrim.richKidDanceUntil > now)
+          );
+        } else {
+          const queueOthers = waitingQueueRef.current.filter(
+            (q) => q.username.trim().toLowerCase() !== attackerLower
+          );
+          if (queueOthers.length > 0) {
+            const qMate =
+              queueOthers[Math.floor(Math.random() * queueOthers.length)];
+            seatmateName = qMate.username;
+            seatmateAvatarUrl = qMate.avatarUrl || null;
+            seatmateAvatarColor = AVATAR_COLORS[0];
+            seatmateIsVip = Boolean(qMate.isVip);
+            seatmateIsGolden = Boolean(qMate.isGoldenPriority);
+          } else {
+            const namesPool =
+              npcNamesRef.current.length > 0 ? npcNamesRef.current : SAMPLE_NAMES;
+            seatmateName =
+              namesPool[Math.floor(Math.random() * namesPool.length)] ||
+              'Bạn Bàn Bên';
+            seatmateAvatarColor =
+              AVATAR_COLORS[Math.floor(Math.random() * AVATAR_COLORS.length)];
+            seatmateIsVip = false;
+            seatmateIsGolden = false;
+          }
+        }
+      }
 
       const projItem: ZombieProjectileFX = {
         id: `zproj_${now}_${Math.random().toString(36).slice(2, 7)}`,
@@ -2473,9 +2571,29 @@ export function useClassroomEngine() {
         attackerUsername: opts.attackerUsername,
         createdAt: now,
         durationMs,
+        seatmateName,
+        seatmateAvatarUrl,
+        seatmateAvatarColor,
+        seatmateIsVip,
+        seatmateIsGolden,
       };
 
       setZombieProjectiles((prev) => [...prev.slice(-22), projItem]);
+
+      // Khi ném "Đứa bàn bên" (desk_mate): Khóa Camera bám sát theo model đạn đang bay!
+      if (opts.kind === 'desk_mate') {
+        const cfgNow = configRef.current;
+        setCameraFocus({
+          pilgrimId: null,
+          focusRole: 'projectile',
+          projectileId: projItem.id,
+          customZoom: cfgNow.cameraZoomScale || 2.25,
+          reason: 'special_gift',
+          startedAt: now,
+          until: now + durationMs + 500,
+          lockedUntil: now + durationMs + 300,
+        });
+      }
 
       // Khi đạn bay trúng người Zombie -> Giật lùi (recoil) + Nổ gai vàng kem (-x máu đỏ) + Trừ HP + Rung thanh máu
       setTimeout(() => {
@@ -2848,10 +2966,16 @@ export function useClassroomEngine() {
       const rawGiftCoins = Math.max(1, Number(opts.coins ?? giftMeta.coins));
       const grantsShield = rawGiftCoins >= 5 || giftMeta.coins >= 5;
 
+      const isFlowerGift =
+        giftMeta.id === 'rose' || giftMeta.id === 'icecream';
+
       // TRƯỜNG HỢP 1: Người chơi ĐANG CÓ TRONG LỚP -> Xếp vào hàng chờ hành động tuần tự (nếu đang rảnh thì chạy ngay, nếu đang bận quà trước thì chờ xong mới chạy quà tiếp theo)
       if (existingInClass) {
         const bonusPts = giftMeta.bonusPoints;
-        addLotusPointsToDonor(safeName, bonusPts);
+        // Riêng quà tặng hoa cho Cô/Thầy: chỉ cộng điểm thưởng khi ném hoa trúng Cô/Thầy
+        if (!isFlowerGift) {
+          addLotusPointsToDonor(safeName, bonusPts);
+        }
 
         // Nếu tặng quà từ 5 coin trở lên -> Nhận ngay Khiên bảo vệ (không cộng dồn)
         if (grantsShield && !existingInClass.hasShield) {
@@ -2862,11 +2986,12 @@ export function useClassroomEngine() {
           setPilgrims(withShield);
         }
 
-        // Nếu thuộc nhóm quà phạt đặc biệt (5 / 10 / 10+) -> ghi nhận ngay vào danh sách phạt cuối vòng câu hỏi
+        // Nếu thuộc nhóm quà phạt đặc biệt (5 / 10 / 10+) -> chỉ ghi nhận ngay khi không ở trong Event Zombie (nếu đang trong Event Zombie thì lúc thực thi hành động quà từ hàng chờ sau Event mới ghi nhận)
         if (
-          giftMeta.id === 'heart' ||
-          giftMeta.id === 'pig' ||
-          giftMeta.id === 'vip'
+          !zombieEventStateRef.current.isActive &&
+          (giftMeta.id === 'heart' ||
+            giftMeta.id === 'pig' ||
+            giftMeta.id === 'vip')
         ) {
           registerStudentForPunishment(safeName, giftMeta.id);
         }
@@ -2893,7 +3018,11 @@ export function useClassroomEngine() {
 
         const existingUserQueue =
           pendingGiftActionsByUserRef.current.get(lowerUser) || [];
+        // Khi đang diễn ra Event Đẩy Lùi Zombie: tất cả các hành động quà tặng bình thường trong lớp đều đưa vào hàng chờ
+        // (Đợi khi sự kiện Zombie kết thúc, bắt đầu vòng câu hỏi mới thì mới kích hoạt tuần tự), tuyệt đối không chạy trùng lúc dùng quà tấn công Zombie!
+        const isZombieEventRunning = zombieEventStateRef.current.isActive;
         const isStudentIdleAtSeat =
+          !isZombieEventRunning &&
           existingInClass.state === 'pray_seated' &&
           existingUserQueue.length === 0 &&
           now >= (existingInClass.giftActionBusyUntil || 0);
@@ -2910,17 +3039,22 @@ export function useClassroomEngine() {
           return;
         }
 
-        // Nếu học sinh đang di chuyển tặng hoa hoặc đang thực hiện hành động quà trước ->
-        // Gắn ngay thẻ COMBO lên người bạn và đẩy hành động vào hàng chờ tuần tự!
-        const comboForQueued = Math.max(2, effectiveCombo);
+        // Nếu đang trong Event Zombie hoặc học sinh đang bận thực hiện hành động quà trước ->
+        // Đẩy hành động vào hàng chờ tuần tự (sẽ tự động kích hoạt khi Event Zombie kết thúc và bắt đầu vòng câu hỏi mới)!
+        const comboForQueued = isZombieEventRunning
+          ? Math.max(1, effectiveCombo)
+          : Math.max(2, effectiveCombo);
         const updatedPilgrimsWithCombo = pilgrimsRef.current.map((p) =>
           p.id === existingInClass.id
             ? {
                 ...p,
                 hasShield: grantsShield ? true : p.hasShield,
-                comboCount: comboForQueued,
-                comboUntil: now + 9000,
-                comboPopKey: now,
+                comboCount:
+                  comboForQueued > 1 ? comboForQueued : p.comboCount,
+                comboUntil:
+                  comboForQueued > 1 ? now + 9000 : p.comboUntil,
+                comboPopKey:
+                  comboForQueued > 1 ? now : p.comboPopKey,
                 totalFlowersToThrow:
                   p.state === 'walk_to_teacher_gift' ||
                   p.state === 'throw_flower_at_teacher'
@@ -2945,7 +3079,9 @@ export function useClassroomEngine() {
         ];
         pendingGiftActionsByUserRef.current.set(lowerUser, nextQueue);
         pushToast(
-          `🔥 ${safeName} tặng ${giftMeta.giftLabel} (COMBO x${comboForQueued} • +${bonusPts}đ) -> Đã xếp hàng chờ hành động tuần tự (#${nextQueue.length})!`,
+          isZombieEventRunning
+            ? `🧟 ${safeName} dùng ${giftMeta.giftLabel} tấn công Zombie! (Hành động "${giftMeta.actionTitle}" đã xếp vào hàng chờ sau Event #${nextQueue.length})`
+            : `🔥 ${safeName} tặng ${giftMeta.giftLabel} (COMBO x${comboForQueued} • +${bonusPts}đ) -> Đã xếp hàng chờ hành động tuần tự (#${nextQueue.length})!`,
           true
         );
         return;
@@ -2956,7 +3092,9 @@ export function useClassroomEngine() {
       const pool = waitingPoolRef.current;
       const existingInQueue = pool.get(lowerUser);
       const bonusPts = giftMeta.bonusPoints;
-      addLotusPointsToDonor(safeName, bonusPts);
+      if (!isFlowerGift) {
+        addLotusPointsToDonor(safeName, bonusPts);
+      }
 
       const resolvedGender = resolveUserGender(safeName, opts.gender);
       const resolvedAvatar =
@@ -2973,7 +3111,9 @@ export function useClassroomEngine() {
         existingInQueue.goldenPriorityAt =
           existingInQueue.goldenPriorityAt || now;
         existingInQueue.isBot = false;
-        existingInQueue.points = (existingInQueue.points || 0) + bonusPts;
+        if (!isFlowerGift) {
+          existingInQueue.points = (existingInQueue.points || 0) + bonusPts;
+        }
         existingInQueue.coins = (existingInQueue.coins || 0) + giftMeta.coins;
         existingInQueue.avatarUrl = resolvedAvatar;
         if (grantsShield) {
@@ -2991,7 +3131,7 @@ export function useClassroomEngine() {
           isBot: false,
           avatarUrl: resolvedAvatar,
           addedAt: now,
-          points: bonusPts,
+          points: isFlowerGift ? 0 : bonusPts,
           rank: 1,
           answeredCorrectInRound: true,
           lastElapsedSec: 0.1,
@@ -3032,7 +3172,7 @@ export function useClassroomEngine() {
       }
 
       // Nếu là Tặng hoa cho cô (rose) hoặc Tặng hoa cho thầy (icecream):
-      // Tạo 1 học sinh tách biệt tại vị trí đám đông cửa lớp thực hiện hành động tặng hoa tuần tự -> ném trúng hiện chatbox Thầy/Cô -> quay về đám đông và xóa đi mất!
+      // Tạo 1 học sinh tách biệt tại vị trí đám đông cửa lớp thực hiện hành động tặng hoa tuần tự -> ném trúng mới cộng điểm thưởng & hiện chatbox Thầy/Cô -> quay về đám đông và xóa đi mất!
       if (giftMeta.id === 'rose' || giftMeta.id === 'icecream') {
         const isForTeacher = giftMeta.id === 'rose';
         const targetRole: 'abbot' | 'senior_novice' = isForTeacher
@@ -3089,44 +3229,55 @@ export function useClassroomEngine() {
           totalFlowersToThrow: hasCombo ? 3 : 1,
           flowersThrownCount: 0,
           flowerBurstsDoneCount: 0,
-          floatingScoreText: `+${bonusPts}đ`,
-          floatingScoreColor: 'gold',
-          floatingScoreUntil: now + 3400,
-          floatingScoreKey: now,
+          pendingFlowerBonusPoints: bonusPts,
+          flowerBonusAwarded: false,
+          floatingScoreUntil: 0,
           isDetachedFlowerRunner: true,
         };
 
+        const isZombieEventRunning = zombieEventStateRef.current.isActive;
         const hasActiveRunnerForSameUser = specialFlowerRunnersRef.current.some(
           (r) => r.username.trim().toLowerCase() === lowerUser
         );
-        if (hasActiveRunnerForSameUser) {
-          const comboRunner = {
+        // Nếu đang trong Event Đẩy Lùi Zombie hoặc người chơi đang có runner chạy trước đó ->
+        // Cho vào hàng chờ pendingDetachedRunnersRef (đợi kết thúc Event Zombie, bắt đầu vòng câu hỏi mới mới chạy lên tặng hoa)!
+        if (isZombieEventRunning || hasActiveRunnerForSameUser) {
+          const queuedRunner = {
             ...detachedRunner,
-            comboCount: Math.max(2, effectiveCombo),
-            comboUntil: now + 9000,
-            comboPopKey: now,
-            totalFlowersToThrow: 3,
+            comboCount: isZombieEventRunning
+              ? hasCombo
+                ? effectiveCombo
+                : undefined
+              : Math.max(2, effectiveCombo),
+            comboUntil:
+              !isZombieEventRunning || hasCombo ? now + 9000 : undefined,
+            comboPopKey: !isZombieEventRunning || hasCombo ? now : undefined,
+            totalFlowersToThrow:
+              !isZombieEventRunning || hasCombo ? 3 : 1,
           };
-          pendingDetachedRunnersRef.current.push(comboRunner);
-          // Cập nhật luôn thẻ Combo & 3 đóa hoa cho runner đang chạy của người chơi này
-          const updatedActiveRunners = specialFlowerRunnersRef.current.map((r) =>
-            r.username.trim().toLowerCase() === lowerUser
-              ? {
-                  ...r,
-                  comboCount: Math.max(2, effectiveCombo),
-                  comboUntil: now + 9000,
-                  comboPopKey: now,
-                  totalFlowersToThrow: 3,
-                }
-              : r
-          );
-          specialFlowerRunnersRef.current = updatedActiveRunners;
-          setSpecialFlowerRunners(updatedActiveRunners);
+          pendingDetachedRunnersRef.current.push(queuedRunner);
+          if (hasActiveRunnerForSameUser) {
+            const updatedActiveRunners = specialFlowerRunnersRef.current.map((r) =>
+              r.username.trim().toLowerCase() === lowerUser
+                ? {
+                    ...r,
+                    comboCount: Math.max(2, effectiveCombo),
+                    comboUntil: now + 9000,
+                    comboPopKey: now,
+                    totalFlowersToThrow: 3,
+                  }
+                : r
+            );
+            specialFlowerRunnersRef.current = updatedActiveRunners;
+            setSpecialFlowerRunners(updatedActiveRunners);
+          }
           pushToast(
-            `🔥 ${safeName} tặng ${giftMeta.giftLabel} (COMBO x${Math.max(
-              2,
-              effectiveCombo
-            )} • +${bonusPts}đ) -> Đã xếp hàng chờ chạy lên tặng 3 đóa hoa tiếp theo!`,
+            isZombieEventRunning
+              ? `🧟 ${safeName} dùng ${giftMeta.giftLabel} tấn công Zombie! (Hành động chạy lên tặng hoa đã xếp vào hàng chờ sau Event)`
+              : `🔥 ${safeName} tặng ${giftMeta.giftLabel} (COMBO x${Math.max(
+                  2,
+                  effectiveCombo
+                )} • +${bonusPts}đ) -> Đã xếp hàng chờ chạy lên tặng 3 đóa hoa tiếp theo!`,
             true
           );
           return;
@@ -3147,10 +3298,11 @@ export function useClassroomEngine() {
       }
 
       // Còn 5 hình thức quà còn lại (cat, gg, heart, pig, vip):
-      // - Cô Giáo hiện chatbox cảm ơn ngay khi nhận quà
-      // - Lưu vào hàng chờ hành động tặng quà tuần tự của học sinh này -> tự động kích hoạt lần lượt từng món sau khi tham gia vào lớp và đã ngồi vào vị trí bàn học!
-      soundEngine.playGiftEventSound(giftMeta.id, cfg);
-      triggerTeacherGiftThankBubble('abbot', safeName);
+      // - Lưu vào hàng chờ hành động tặng quà tuần tự của học sinh này -> tự động kích hoạt lần lượt từng món sau khi tham gia vào lớp và đã ngồi vào vị trí bàn học (và sau khi Event Zombie kết thúc)!
+      if (!zombieEventStateRef.current.isActive) {
+        soundEngine.playGiftEventSound(giftMeta.id, cfg);
+        triggerTeacherGiftThankBubble('abbot', safeName);
+      }
       const existingActionList =
         pendingGiftActionsByUserRef.current.get(lowerUser) || [];
       pendingGiftActionsByUserRef.current.set(lowerUser, [
@@ -3166,7 +3318,9 @@ export function useClassroomEngine() {
       ]);
 
       pushToast(
-        `👑 ${safeName} tặng ${giftMeta.giftLabel} (+${bonusPts}đ) -> Hóa Vàng Đầu Hàng Chờ (Sẽ kích hoạt tuần tự "${giftMeta.actionTitle}" khi ngồi vào bàn)!`,
+        zombieEventStateRef.current.isActive
+          ? `🧟 ${safeName} dùng ${giftMeta.giftLabel} tấn công Zombie! (Hành động "${giftMeta.actionTitle}" đã xếp vào hàng chờ sau Event)`
+          : `👑 ${safeName} tặng ${giftMeta.giftLabel} (+${bonusPts}đ) -> Hóa Vàng Đầu Hàng Chờ (Sẽ kích hoạt tuần tự "${giftMeta.actionTitle}" khi ngồi vào bàn)!`,
         true
       );
     },
@@ -3839,6 +3993,10 @@ export function useClassroomEngine() {
         role: 'abbot' | 'senior_novice';
         username: string;
       }> = [];
+      const flowerHitBonusAwards: Array<{
+        username: string;
+        points: number;
+      }> = [];
 
       const prevPilgrims = pilgrimsRef.current;
       if (prevPilgrims.length > 0) {
@@ -4081,9 +4239,22 @@ export function useClassroomEngine() {
               ]);
             }
 
-            // Hiệu ứng nổ hoa khi từng đóa hoa chạm đích (0.46s, 0.64s, 0.82s)
+            // Hiệu ứng nổ hoa & bắt đầu cộng điểm thưởng khi đóa hoa chạm đích trúng Cô Giáo / Thầy Giám Thị (0.46s, 0.64s, 0.82s)
             if (stateTimer >= 0.46 && burstsDone < 1) {
               burstsDone = 1;
+              if (!p.flowerBonusAwarded) {
+                p.flowerBonusAwarded = true;
+                const awardPts = p.pendingFlowerBonusPoints || 10;
+                const hitNow = Date.now();
+                p.floatingScoreText = `+${awardPts}đ`;
+                p.floatingScoreColor = 'gold';
+                p.floatingScoreUntil = hitNow + 3400;
+                p.floatingScoreKey = hitNow;
+                flowerHitBonusAwards.push({
+                  username: p.username,
+                  points: awardPts,
+                });
+              }
               soundEngine.playSimpleExplosionSfx('flower', cfg.ttsVolume);
               setSimpleExplosions((prev) => [
                 ...prev.slice(-12),
@@ -4176,6 +4347,11 @@ export function useClassroomEngine() {
                       : 1;
                   p.flowersThrownCount = 0;
                   p.flowerBurstsDoneCount = 0;
+                  p.pendingFlowerBonusPoints = resolveClassroomGiftKind(
+                    nextFlowerAct.giftId,
+                    1
+                  ).bonusPoints;
+                  p.flowerBonusAwarded = false;
                   state = 'walk_to_teacher_gift';
                   stateTimer = 0;
                 } else {
@@ -4323,8 +4499,9 @@ export function useClassroomEngine() {
             y = p.slotY;
           }
 
-          // Nếu học sinh đang ngồi ổn định tại bàn (pray_seated) và đã hết thời gian bận của quà trước -> kiểm tra hàng chờ quà tặng tuần tự!
+          // Nếu học sinh đang ngồi ổn định tại bàn (pray_seated), KHÔNG ở trong Event Zombie, và đã hết thời gian bận của quà trước -> kiểm tra hàng chờ quà tặng tuần tự!
           if (
+            !zombieEventStateRef.current.isActive &&
             state === 'pray_seated' &&
             Boolean(p.slotId) &&
             !p.leaveAfterGiftAction &&
@@ -4359,12 +4536,14 @@ export function useClassroomEngine() {
       // 2.5. Cập nhật các học sinh tách biệt đặc biệt (specialFlowerRunners) chạy từ đám đông lên tặng hoa cho Cô/Thầy rồi quay về đám đông biến mất
       if (
         specialFlowerRunnersRef.current.length > 0 ||
-        pendingDetachedRunnersRef.current.length > 0
+        (!zombieEventStateRef.current.isActive &&
+          pendingDetachedRunnersRef.current.length > 0)
       ) {
         setSpecialFlowerRunners((prevRunners) => {
           if (
             prevRunners.length === 0 &&
-            pendingDetachedRunnersRef.current.length === 0
+            (zombieEventStateRef.current.isActive ||
+              pendingDetachedRunnersRef.current.length === 0)
           ) {
             return prevRunners;
           }
@@ -4502,6 +4681,19 @@ export function useClassroomEngine() {
 
               if (stateTimer >= 0.46 && burstsDone < 1) {
                 burstsDone = 1;
+                if (!r.flowerBonusAwarded) {
+                  r.flowerBonusAwarded = true;
+                  const awardPts = r.pendingFlowerBonusPoints || 10;
+                  const hitNow = Date.now();
+                  r.floatingScoreText = `+${awardPts}đ`;
+                  r.floatingScoreColor = 'gold';
+                  r.floatingScoreUntil = hitNow + 3400;
+                  r.floatingScoreKey = hitNow;
+                  flowerHitBonusAwards.push({
+                    username: r.username,
+                    points: awardPts,
+                  });
+                }
                 soundEngine.playSimpleExplosionSfx('flower', cfg.ttsVolume);
                 setSimpleExplosions((prev) => [
                   ...prev.slice(-12),
@@ -4583,8 +4775,11 @@ export function useClassroomEngine() {
             });
           }
 
-          // Nếu có runner tặng hoa đang xếp hàng chờ tuần tự ở cửa lớp và người chơi đó đã hoàn thành lượt chạy trước -> xuất phát lượt tiếp theo!
-          if (pendingDetachedRunnersRef.current.length > 0) {
+          // Nếu KHÔNG ở trong Event Zombie và có runner tặng hoa đang xếp hàng chờ tuần tự ở cửa lớp -> xuất phát lượt tiếp theo!
+          if (
+            !zombieEventStateRef.current.isActive &&
+            pendingDetachedRunnersRef.current.length > 0
+          ) {
             const activeUserSet = new Set(
               nextRunners.map((nr) => nr.username.trim().toLowerCase())
             );
@@ -4604,7 +4799,8 @@ export function useClassroomEngine() {
                   hasComment: false,
                   chatBubbleUntil: 0,
                   giftActionHighlightUntil: Date.now() + 6000,
-                  floatingScoreUntil: Date.now() + 3400,
+                  flowerBonusAwarded: false,
+                  floatingScoreUntil: 0,
                 });
               } else {
                 remainingQueuedRunners.push(qr);
@@ -4616,6 +4812,23 @@ export function useClassroomEngine() {
           specialFlowerRunnersRef.current = nextRunners;
           return nextRunners;
         });
+      }
+
+      // Khi bó hoa vừa ném trúng người Cô Giáo / Thầy Giám Thị -> bắt đầu cộng điểm thưởng (+10đ)!
+      if (flowerHitBonusAwards.length > 0) {
+        let updatedQueuePoints = false;
+        flowerHitBonusAwards.forEach((aw) => {
+          addLotusPointsToDonor(aw.username, aw.points);
+          const lowerU = aw.username.trim().toLowerCase();
+          const qItem = waitingPoolRef.current.get(lowerU);
+          if (qItem) {
+            qItem.points = (qItem.points || 0) + aw.points;
+            updatedQueuePoints = true;
+          }
+        });
+        if (updatedQueuePoints) {
+          recomputeWaitingQueueLazy();
+        }
       }
 
       // Khi bó hoa vừa ném trúng người Cô Giáo / Thầy Giám Thị -> hiện ngay chatbox "Cảm ơn bạn A nhé /-heart"
@@ -5125,6 +5338,11 @@ export function useClassroomEngine() {
           giftActionKind: nextFlowerAct.giftId,
           giftTargetRole: nextRole,
           giftTargetPos: { x: nextTargetX, y: nextTargetY },
+          pendingFlowerBonusPoints: resolveClassroomGiftKind(
+            nextFlowerAct.giftId,
+            1
+          ).bonusPoints,
+          flowerBonusAwarded: false,
           state: 'walk_to_teacher_gift' as const,
           stateTimer: 0,
           coins: 0,
@@ -5603,6 +5821,40 @@ export function useClassroomEngine() {
   // Hệ thống NPC trong lớp và NPC trong Hàng Chờ phát biểu rải rác tự nhiên theo "Mật độ rải chat" (npcScatterChatDensity: 0%..100%)
   const nextClassScatterAtRef = useRef<number>(Date.now() + 2600);
   const nextQueueScatterAtRef = useRef<number>(Date.now() + 1800);
+  const pendingSeatmateReplyBotIdRef = useRef<number | null>(null);
+
+  const pickRandomSpeechFromThreeGroups = useCallback(
+    (cfg: GameConfig, fallbackList: string[]): string => {
+      const cats = cfg.npcSpeechCategories ?? DEFAULT_NPC_SPEECH_CATEGORIES;
+      const nonEmptyGroups = [cats.idle, cats.question, cats.reply].filter(
+        (g): g is string[] => Array.isArray(g) && g.length > 0
+      );
+      if (nonEmptyGroups.length > 0) {
+        const chosenGroup =
+          nonEmptyGroups[Math.floor(Math.random() * nonEmptyGroups.length)];
+        return chosenGroup[Math.floor(Math.random() * chosenGroup.length)];
+      }
+      const list = fallbackList.length > 0 ? fallbackList : SAMPLE_PRAYERS;
+      return list[Math.floor(Math.random() * list.length)];
+    },
+    []
+  );
+
+  const pickRandomReplySpeech = useCallback(
+    (cfg: GameConfig, fallbackList: string[]): string => {
+      const cats = cfg.npcSpeechCategories ?? DEFAULT_NPC_SPEECH_CATEGORIES;
+      const replyGroup =
+        Array.isArray(cats.reply) && cats.reply.length > 0
+          ? cats.reply
+          : DEFAULT_NPC_SPEECH_CATEGORIES.reply;
+      if (replyGroup.length > 0) {
+        return replyGroup[Math.floor(Math.random() * replyGroup.length)];
+      }
+      const list = fallbackList.length > 0 ? fallbackList : SAMPLE_PRAYERS;
+      return list[Math.floor(Math.random() * list.length)];
+    },
+    []
+  );
 
   useEffect(() => {
     const computeScatterDelayMs = (densityPercent: number) => {
@@ -5637,15 +5889,14 @@ export function useClassroomEngine() {
         return;
       }
 
-      // 1. Rải chat độc lập cho NPC trong Hàng Chờ -> hiện chat box trên 1 học sinh ở cửa lớp
+      // 1. Rải chat độc lập cho NPC trong Hàng Chờ -> chọn ngẫu nhiên 1 trong 3 nhóm (Vu vơ / Hỏi / Trả lời)
       if (now >= nextQueueScatterAtRef.current) {
         nextQueueScatterAtRef.current = now + computeScatterDelayMs(density);
         const queuedBots = waitingQueueRef.current.filter((q) => q.isBot);
         if (queuedBots.length > 0) {
           const chosenQueued =
             queuedBots[Math.floor(Math.random() * queuedBots.length)];
-          const queueComment =
-            prayers[Math.floor(Math.random() * prayers.length)];
+          const queueComment = pickRandomSpeechFromThreeGroups(cfg, prayers);
           spawnOrPromotePilgrim({
             username: chosenQueued.username,
             prayer: queueComment,
@@ -5659,20 +5910,46 @@ export function useClassroomEngine() {
         }
       }
 
-      // 2. Rải chat độc lập cho NPC đang ngồi trong lớp (ưu tiên bạn chưa hiện bong bóng chat để rải đều khắp lớp)
+      // 2. Rải chat cho NPC đang ngồi trong lớp (kèm thuật toán ưu tiên bạn NPC ngồi cạnh cùng bàn đôi trả lời ở lượt kế tiếp)
       if (now >= nextClassScatterAtRef.current) {
-        nextClassScatterAtRef.current = now + computeScatterDelayMs(density);
         const seatedBots = pilgrimsRef.current.filter(
           (p) => p.isBot && p.state === 'pray_seated'
         );
-        if (seatedBots.length === 0) return;
+        if (seatedBots.length === 0) {
+          pendingSeatmateReplyBotIdRef.current = null;
+          nextClassScatterAtRef.current = now + computeScatterDelayMs(density);
+          return;
+        }
+
+        // Kiểm tra xem có bạn NPC cùng bàn đang được đẩy lên trả lời lượt kế tiếp không
+        if (pendingSeatmateReplyBotIdRef.current !== null) {
+          const pendingBotId = pendingSeatmateReplyBotIdRef.current;
+          pendingSeatmateReplyBotIdRef.current = null;
+          const replyBot = seatedBots.find((p) => p.id === pendingBotId);
+          if (replyBot) {
+            const replyComment = pickRandomReplySpeech(cfg, prayers);
+            nextClassScatterAtRef.current = now + computeScatterDelayMs(density);
+            spawnOrPromotePilgrim({
+              username: replyBot.username,
+              prayer: replyComment,
+              gender: replyBot.gender,
+              isVip: false,
+              coins: 0,
+              isBot: true,
+              avatarUrl: replyBot.avatarUrl,
+            });
+            return;
+          }
+        }
+
+        nextClassScatterAtRef.current = now + computeScatterDelayMs(density);
 
         const idleBubbleBots = seatedBots.filter(
           (p) => !p.chatBubbleUntil || p.chatBubbleUntil <= now
         );
         const pool = idleBubbleBots.length > 0 ? idleBubbleBots : seatedBots;
         const chosen = pool[Math.floor(Math.random() * pool.length)];
-        const nextComment = prayers[Math.floor(Math.random() * prayers.length)];
+        const nextComment = pickRandomSpeechFromThreeGroups(cfg, prayers);
 
         spawnOrPromotePilgrim({
           username: chosen.username,
@@ -5683,11 +5960,43 @@ export function useClassroomEngine() {
           isBot: true,
           avatarUrl: chosen.avatarUrl,
         });
+
+        // Kiểm tra xem ghế bên cạnh cùng bàn đôi với `chosen` có bạn NPC nào đang ngồi không
+        if (chosen.slotId) {
+          const allDesks = [
+            ...groupSlotsIntoDoubleDesks(vipSlotsRef.current, 'vip'),
+            ...groupSlotsIntoDoubleDesks(normalSlotsRef.current, 'norm'),
+          ];
+          const desk = allDesks.find(
+            (d) =>
+              d.leftSlot.id === chosen.slotId || d.rightSlot?.id === chosen.slotId
+          );
+          const partnerSlotId = desk
+            ? desk.leftSlot.id === chosen.slotId
+              ? desk.rightSlot?.id
+              : desk.leftSlot.id
+            : undefined;
+          if (partnerSlotId) {
+            const seatmateBot = seatedBots.find(
+              (p) => p.id !== chosen.id && p.slotId === partnerSlotId
+            );
+            if (seatmateBot) {
+              // Đẩy bạn NPC cùng bàn lên phát biểu ở lượt kế tiếp với câu lấy từ nhóm "Trả lời"
+              pendingSeatmateReplyBotIdRef.current = seatmateBot.id;
+              nextClassScatterAtRef.current =
+                now + Math.min(computeScatterDelayMs(density), 2200);
+            }
+          }
+        }
       }
     }, 350);
 
     return () => clearInterval(timer);
-  }, [spawnOrPromotePilgrim]);
+  }, [
+    pickRandomReplySpeech,
+    pickRandomSpeechFromThreeGroups,
+    spawnOrPromotePilgrim,
+  ]);
 
   // Đồng bộ cấu hình engine, bộ câu hỏi & thời gian câu hỏi (mặc định 12s cho Luồng 2 & 3) vào classBoardState khi người dùng chỉnh trong Studio
   useEffect(() => {
@@ -5763,6 +6072,8 @@ export function useClassroomEngine() {
       const nextLeft = Math.max(0, prev.timeLeftMs - dtMs);
       const nextElapsed = (prev.elapsedPhaseMs || 0) + dtMs;
 
+      const cfg = configRef.current;
+
       // Xác định điều kiện hoàn thành của từng luồng (theo giọng đọc TTS hoặc theo thời gian cố định):
       let shouldAdvance = false;
       if (prev.phase === 'lesson_start') {
@@ -5782,9 +6093,14 @@ export function useClassroomEngine() {
           nextElapsed < prev.totalDurationMs + 9000;
         shouldAdvance = nextLeft <= 0 && !waitingForIdleChatFinish;
       } else if (prev.phase === 'answer_flash') {
-        // Luồng 4: Nói xong chuyển luồng next (hiển thị hiệu ứng đáp án tối thiểu 1.8s)
+        // Luồng 4: Đọc xong -> chờ thời gian chờ sau khi đọc xong (mặc định 1s) -> chuyển sang Luồng 5
+        const postTtsWaitMs4 =
+          Math.max(0, Number(cfg.lessonFlow4PostTtsDelaySec ?? 1)) * 1000;
+        const finishedAtElapsed = prev.ttsFinishedAtElapsedMs ?? 0;
         shouldAdvance =
-          (Boolean(prev.ttsFinishedForPhase) && nextElapsed >= 1800) ||
+          (Boolean(prev.ttsFinishedForPhase) &&
+            nextElapsed - finishedAtElapsed >= postTtsWaitMs4 &&
+            nextElapsed >= 600) ||
           nextLeft <= 0;
       } else if (prev.phase === 'result_summary') {
         // Luồng 5: Nói xong chuyển luồng next (hiển thị bảng kết quả 2 cột tối thiểu 2.8s)
@@ -5802,8 +6118,6 @@ export function useClassroomEngine() {
           (Boolean(prev.ttsFinishedForPhase) && nextElapsed >= 2500) ||
           nextLeft <= 0;
       }
-
-      const cfg = configRef.current;
 
       if (!shouldAdvance) {
         // Trong Luồng 2 & 3: sau 2.8s đầu đọc đề, tự động chuyển nhãn sang Luồng 3 (Đợi trả lời / Gợi ý) nếu chưa chuyển
@@ -6121,13 +6435,16 @@ export function useClassroomEngine() {
           cfg
         );
 
-        const fallbackDur4 = enqueued4 ? 12000 : 2500;
+        const postTtsWaitMs4 =
+          Math.max(0, Number(cfg.lessonFlow4PostTtsDelaySec ?? 1)) * 1000;
+        const fallbackDur4 = (enqueued4 ? 14000 : 1200) + postTtsWaitMs4;
         const answerFlashState: ClassBoardRuntimeState = {
           ...prev,
           phase: 'answer_flash',
           lessonStepNumber: 4,
           activeFlowToken: flowToken4,
           ttsFinishedForPhase: !enqueued4,
+          ttsFinishedAtElapsedMs: !enqueued4 ? 0 : undefined,
           elapsedPhaseMs: 0,
           timeLeftMs: fallbackDur4,
           totalDurationMs: fallbackDur4,
@@ -7142,15 +7459,65 @@ export function useClassroomEngine() {
         const top2 = topList[1];
         const top3 = topList[2];
 
-        // Cộng thưởng thực tế Hoa Điểm 10 (+200 / +100 / +50) cho Top 1, 2, 3
+        // Cộng thưởng thực tế Hoa Điểm 10:
+        // - Top 1: +200đ, Top 2: +100đ, Top 3: +50đ
+        // - Tất cả các bạn còn lại (trừ 3 bạn đạt Top ra), cả trong lớp và trong hàng chờ: mỗi bạn +25đ
         const rewardEntries: Array<{ username: string; pts: number }> = [];
         if (top1) rewardEntries.push({ username: top1.username, pts: 200 });
         if (top2) rewardEntries.push({ username: top2.username, pts: 100 });
         if (top3) rewardEntries.push({ username: top3.username, pts: 50 });
 
+        const top3LowerSet = new Set<string>(
+          rewardEntries.map((r) => r.username.trim().toLowerCase())
+        );
+
+        const remainingUsersMap = new Map<string, string>();
+        pilgrimsRef.current.forEach((p) => {
+          if (
+            Boolean(p.slotId) &&
+            p.state !== 'leave_side_to_aisle' &&
+            p.state !== 'leave_down_exit'
+          ) {
+            const clean = (p.username || '').trim();
+            const lower = clean.toLowerCase();
+            if (clean && !top3LowerSet.has(lower) && !remainingUsersMap.has(lower)) {
+              remainingUsersMap.set(lower, clean);
+            }
+          }
+        });
+        waitingPoolRef.current.forEach((qItem) => {
+          const clean = (qItem.username || '').trim();
+          const lower = clean.toLowerCase();
+          if (clean && !top3LowerSet.has(lower) && !remainingUsersMap.has(lower)) {
+            remainingUsersMap.set(lower, clean);
+          }
+        });
+        waitingQueueRef.current.forEach((qItem) => {
+          const clean = (qItem.username || '').trim();
+          const lower = clean.toLowerCase();
+          if (clean && !top3LowerSet.has(lower) && !remainingUsersMap.has(lower)) {
+            remainingUsersMap.set(lower, clean);
+          }
+        });
+
+        remainingUsersMap.forEach((uName) => {
+          rewardEntries.push({ username: uName, pts: 25 });
+        });
+
+        let updatedWaitingQueuePoints = false;
         rewardEntries.forEach((r) => {
           addLotusPointsToDonor(r.username, r.pts);
+          const qItem = waitingPoolRef.current.get(
+            r.username.trim().toLowerCase()
+          );
+          if (qItem) {
+            qItem.points = (qItem.points || 0) + r.pts;
+            updatedWaitingQueuePoints = true;
+          }
         });
+        if (updatedWaitingQueuePoints) {
+          recomputeWaitingQueueLazy();
+        }
 
         const rewardMap = new Map<string, number>();
         rewardEntries.forEach((r) =>
@@ -7368,6 +7735,7 @@ export function useClassroomEngine() {
     addLotusPointsToDonor,
     getSortedZombieTopDamagers,
     pushToast,
+    recomputeWaitingQueueLazy,
   ]);
 
   // Tự động cho NPC trong lớp & hàng chờ phụ thả tim ném hộp bút vào Zombie khi đang ở Luồng 5 Chiến Đấu (nếu bật zombieNpcAutoAttack)
@@ -8793,7 +9161,7 @@ export function useClassroomEngine() {
           ? npcPrayersRef.current
           : SAMPLE_PRAYERS;
       const username = names[Math.floor(Math.random() * names.length)];
-      const prayer = prayers[Math.floor(Math.random() * prayers.length)];
+      const prayer = pickRandomSpeechFromThreeGroups(configRef.current, prayers);
       const coins = isVip ? 5 : 0;
       spawnOrPromotePilgrim({
         username,
@@ -8813,7 +9181,7 @@ export function useClassroomEngine() {
         bypassWaitingQueue: true,
       });
     },
-    [spawnOrPromotePilgrim]
+    [pickRandomSpeechFromThreeGroups, spawnOrPromotePilgrim]
   );
 
   const handleSpawnBatch = useCallback(
@@ -8824,7 +9192,10 @@ export function useClassroomEngine() {
       for (let i = 0; i < count; i++) {
         setTimeout(() => {
           const username = names[Math.floor(Math.random() * names.length)];
-          const prayer = prayers[Math.floor(Math.random() * prayers.length)];
+          const prayer = pickRandomSpeechFromThreeGroups(
+            configRef.current,
+            prayers
+          );
           spawnOrPromotePilgrim({
             username,
             prayer,
@@ -8835,7 +9206,7 @@ export function useClassroomEngine() {
         }, i * 220);
       }
     },
-    [spawnOrPromotePilgrim]
+    [pickRandomSpeechFromThreeGroups, spawnOrPromotePilgrim]
   );
 
   const handleLeaveAll = useCallback(() => {
@@ -9226,6 +9597,14 @@ export function useClassroomEngine() {
   }, []);
   const handleResetNpcPrayers = useCallback(() => {
     setNpcPrayers(SAMPLE_PRAYERS);
+    setConfig((prev) => ({
+      ...prev,
+      npcSpeechCategories: {
+        idle: [...DEFAULT_NPC_SPEECH_CATEGORIES.idle],
+        question: [...DEFAULT_NPC_SPEECH_CATEGORIES.question],
+        reply: [...DEFAULT_NPC_SPEECH_CATEGORIES.reply],
+      },
+    }));
   }, []);
   const handleUpdateNpcAvatars = useCallback((list: string[]) => {
     setNpcAvatars(list);

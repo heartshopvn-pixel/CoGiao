@@ -31,6 +31,7 @@ interface ClassroomArtProps {
   deskScale?: number;
   studentDeskGap?: number;
   giftModelScales?: GiftModelScalesConfig;
+  renderLayer?: 'all' | 'background' | 'desks';
   latestAltarOffering?: {
     type: OfferingGiftType;
     username: string;
@@ -50,6 +51,7 @@ export const ClassroomArt: React.FC<ClassroomArtProps> = ({
   deskScale = 1,
   studentDeskGap = 24,
   giftModelScales = DEFAULT_GIFT_MODEL_SCALES,
+  renderLayer = 'all',
   latestAltarOffering,
 }) => {
   const activeDeskUrl = customAssets.deskModelUrl || DEFAULT_DESK_IMAGE;
@@ -68,12 +70,17 @@ export const ClassroomArt: React.FC<ClassroomArtProps> = ({
     [vipDesks, normalDesks]
   );
 
+  const showBackground = renderLayer !== 'desks';
+  const showDesks = renderLayer !== 'background';
+
   return (
-    <div className="absolute inset-0 z-10 pointer-events-none select-none overflow-hidden">
-      {/* 1. NỀN LỚP HỌC CẤP 3 VIỆT NAM (Tường vàng kem, cửa sổ nắng & hoa phượng, bảng phấn xanh, sàn gạch bông) */}
-      {customAssets.customBgUrl ? (
-        <img
-          src={
+    <>
+      {showBackground && (
+        <div className="absolute inset-0 z-10 pointer-events-none select-none overflow-hidden">
+          {/* 1. NỀN LỚP HỌC CẤP 3 VIỆT NAM (Tường vàng kem, cửa sổ nắng & hoa phượng, bảng phấn xanh, sàn gạch bông) */}
+          {customAssets.customBgUrl ? (
+            <img
+              src={
             customAssets.customBgUrl.startsWith('/assets/')
               ? `.${customAssets.customBgUrl}`
               : customAssets.customBgUrl
@@ -486,300 +493,378 @@ export const ClassroomArt: React.FC<ClassroomArtProps> = ({
           </g>
         </svg>
       )}
+        </div>
+      )}
 
-      {/* 3. HỆ THỐNG BÀN ĐÔI 2 CHỖ NGỒI ĐỒNG NHẤT (Hỗ trợ đổi skin bàn PC Gaming + đặt Mèo / Snack sát cạnh trái/phải của bàn) */}
-      {allDesks.map((desk, deskIdx) => {
-        const deskNumber = deskIdx + 1;
-        const safeDeskScale = Math.max(0.5, Math.min(3.0, deskScale || 1));
-        const baseDeskW = desk.width;
-        const baseDeskH = Math.round(baseDeskW * 0.56);
-        const deskW = Math.round(baseDeskW * safeDeskScale);
-        const deskH = Math.round(baseDeskH * safeDeskScale);
-        const gapY = typeof studentDeskGap === 'number' ? studentDeskGap : 24;
-        const deskRenderY = desk.centerY - gapY;
-        const zIdx = Math.max(12, Math.floor(desk.centerY / 10));
+      {/* 3. HỆ THỐNG BÀN ĐÔI 2 CHỖ NGỒI ĐỒNG NHẤT (Hỗ trợ đổi skin bàn PC Gaming + chia mặt bàn làm 2 nửa đối xứng Trái/Phải cho Mèo / Bịch bánh / Heo) */}
+      {showDesks &&
+        allDesks.map((desk, deskIdx) => {
+          const deskNumber = deskIdx + 1;
+          const safeDeskScale = Math.max(0.5, Math.min(3.0, deskScale || 1));
+          const baseDeskW = desk.width;
+          const baseDeskH = Math.round(baseDeskW * 0.56);
+          const deskW = Math.round(baseDeskW * safeDeskScale);
+          const deskH = Math.round(baseDeskH * safeDeskScale);
+          const gapY = typeof studentDeskGap === 'number' ? studentDeskGap : 24;
+          const deskRenderY = desk.centerY - gapY;
+          // 2.5D Depth Y-Sorting: bàn có zIndex theo độ sâu Y thực tế (nhỏ hơn học sinh ngồi tại chính bàn đó để học sinh ngồi sau bàn đè lên bàn của mình, nhưng lớn hơn toàn bộ hàng ghế phía trước)
+          const zIdx = Math.max(
+            20,
+            Math.round(Math.min(deskRenderY, desk.centerY - 25))
+          );
 
-        const leftOccupant = pilgrims.find(
-          (p) =>
-            p.slotId === desk.leftSlot.id &&
-            p.state !== 'leave_side_to_aisle' &&
-            p.state !== 'leave_down_exit'
-        );
-        const rightOccupant = desk.rightSlot
-          ? pilgrims.find(
-              (p) =>
-                p.slotId === desk.rightSlot!.id &&
-                p.state !== 'leave_side_to_aisle' &&
-                p.state !== 'leave_down_exit'
-            )
-          : undefined;
+          const leftOccupant = pilgrims.find(
+            (p) =>
+              p.slotId === desk.leftSlot.id &&
+              p.state !== 'leave_side_to_aisle' &&
+              p.state !== 'leave_down_exit'
+          );
+          const rightOccupant = desk.rightSlot
+            ? pilgrims.find(
+                (p) =>
+                  p.slotId === desk.rightSlot!.id &&
+                  p.state !== 'leave_side_to_aisle' &&
+                  p.state !== 'leave_down_exit'
+              )
+            : undefined;
 
-        const isPcGamingSkin = Boolean(
-          leftOccupant?.hasPcGamingDesk || rightOccupant?.hasPcGamingDesk
-        );
-        const pcScale = Math.max(
-          0.4,
-          Math.min(2.5, giftModelScales?.pcGamingDesk ?? 1)
-        );
-        const catScale = Math.max(
-          0.4,
-          Math.min(2.5, giftModelScales?.deskCat ?? 1)
-        );
-        const snackScale = Math.max(
-          0.4,
-          Math.min(2.5, giftModelScales?.snackBag ?? 1)
-        );
-        const catOffsetX = giftModelScales?.deskCatOffsetX ?? 0;
-        const catOffsetY = giftModelScales?.deskCatOffsetY ?? 0;
-        const snackOffsetX = giftModelScales?.snackBagOffsetX ?? 0;
-        const snackOffsetY = giftModelScales?.snackBagOffsetY ?? 0;
+          const isPcGamingSkin = Boolean(
+            leftOccupant?.hasPcGamingDesk || rightOccupant?.hasPcGamingDesk
+          );
+          const pcScale = Math.max(
+            0.4,
+            Math.min(3.5, giftModelScales?.pcGamingDesk ?? 1.25)
+          );
+          const catScale = Math.max(
+            0.4,
+            Math.min(2.5, giftModelScales?.deskCat ?? 1)
+          );
+          const snackScale = Math.max(
+            0.4,
+            Math.min(2.5, giftModelScales?.snackBag ?? 1)
+          );
+          const catOffsetX = giftModelScales?.deskCatOffsetX ?? 0;
+          const catOffsetY = giftModelScales?.deskCatOffsetY ?? 0;
+          const snackOffsetX = giftModelScales?.snackBagOffsetX ?? 0;
+          const snackOffsetY = giftModelScales?.snackBagOffsetY ?? 0;
 
-        return (
-          <div
-            key={desk.deskId}
-            className="absolute pointer-events-none"
-            style={{
-              left: desk.centerX,
-              top: deskRenderY,
-              width: deskW,
-              height: deskH,
-              transform: 'translate(-50%, -50%)',
-              zIndex: zIdx,
-            }}
-          >
-            {isPcGamingSkin ? (
-              <div
-                className="relative w-full h-full flex items-center justify-center"
-                style={{
-                  transform: `scale(${pcScale})`,
-                }}
-              >
-                <PcGamingDeskModel
-                  customUrl={customAssets.pcGamingDeskUrl}
-                  scale={1}
-                  className="w-full h-full"
-                />
-                <span
-                  className="absolute top-[10%] left-[6%] w-4 h-4 rounded-full bg-fuchsia-950/95 border border-cyan-300 text-cyan-200 font-mono font-extrabold text-[8.5px] leading-none flex items-center justify-center shadow-[0_0_8px_rgba(34,211,238,0.8)]"
+          return (
+            <div
+              key={desk.deskId}
+              className="absolute pointer-events-none select-none"
+              style={{
+                left: desk.centerX,
+                top: deskRenderY,
+                width: deskW,
+                height: deskH,
+                transform: 'translate(-50%, -50%)',
+                zIndex: zIdx,
+              }}
+            >
+              {isPcGamingSkin ? (
+                <div
+                  className="relative w-full h-full flex items-center justify-center"
                   style={{
-                    transform: `scale(${Math.max(0.85, Math.min(1.3, safeDeskScale))})`,
+                    transform: `scale(${pcScale})`,
                   }}
                 >
-                  {deskNumber}
-                </span>
-              </div>
-            ) : processedDeskUrl ? (
-              <div className="relative w-full h-full">
-                <img
-                  src={processedDeskUrl}
-                  alt={`Bàn học ${deskNumber}`}
-                  className="w-full h-full object-fill select-none pointer-events-none drop-shadow-[0_3px_4px_rgba(15,23,42,0.45)]"
-                />
-                {/* Số thứ tự bàn nằm trong hình tròn nhỏ ở 1 góc bàn */}
-                <span
-                  className="absolute top-[14%] left-[7%] w-4 h-4 rounded-full bg-amber-950/90 border border-amber-300/90 text-amber-200 font-mono font-extrabold text-[8.5px] leading-none flex items-center justify-center shadow-sm"
-                  style={{
-                    transform: `scale(${Math.max(0.85, Math.min(1.3, safeDeskScale))})`,
-                  }}
-                >
-                  {deskNumber}
-                </span>
-              </div>
-            ) : (
-              <div className="relative w-full h-full">
-                <svg
-                  viewBox="0 0 100 46"
-                  className="w-full h-full overflow-visible drop-shadow-sm"
-                >
-                  <rect
-                    x="6"
-                    y="26"
-                    width="88"
-                    height="9"
-                    rx="2.5"
-                    fill="#78350f"
-                    stroke="#451a03"
-                    strokeWidth="1.2"
+                  <PcGamingDeskModel
+                    customUrl={customAssets.pcGamingDeskUrl}
+                    scale={1}
+                    width={deskW}
+                    height={deskH}
+                    className="w-full h-full"
                   />
-                  <rect x="10" y="34" width="4" height="8" rx="1" fill="#292524" />
-                  <rect x="86" y="34" width="4" height="8" rx="1" fill="#292524" />
-                  <rect x="4" y="18" width="4.5" height="22" rx="1" fill="#334155" />
-                  <rect x="91.5" y="18" width="4.5" height="22" rx="1" fill="#334155" />
-                  <rect
-                    x="5"
-                    y="13"
-                    width="90"
-                    height="11"
-                    rx="1.5"
-                    fill="#92400e"
-                    stroke="#451a03"
-                    strokeWidth="1.2"
+                  <span
+                    className="absolute top-[10%] left-[6%] w-4 h-4 rounded-full bg-fuchsia-950/95 border border-cyan-300 text-cyan-200 font-mono font-extrabold text-[8.5px] leading-none flex items-center justify-center shadow-[0_0_8px_rgba(34,211,238,0.8)]"
+                    style={{
+                      transform: `scale(${Math.max(
+                        0.85,
+                        Math.min(1.3, safeDeskScale)
+                      )})`,
+                    }}
+                  >
+                    {deskNumber}
+                  </span>
+                </div>
+              ) : processedDeskUrl ? (
+                <div className="relative w-full h-full">
+                  <img
+                    src={processedDeskUrl}
+                    alt={`Bàn học ${deskNumber}`}
+                    className="w-full h-full object-fill select-none pointer-events-none drop-shadow-[0_3px_4px_rgba(15,23,42,0.45)]"
                   />
-                  <polygon
-                    points="2,14 98,14 93,2 7,2"
-                    fill="#d97706"
-                    stroke="#78350f"
-                    strokeWidth="1.5"
-                  />
-                </svg>
-                {/* Số thứ tự bàn nằm trong hình tròn nhỏ ở 1 góc bàn */}
-                <span
-                  className="absolute top-[6%] left-[7%] w-4 h-4 rounded-full bg-amber-950/90 border border-amber-300/90 text-amber-200 font-mono font-extrabold text-[8.5px] leading-none flex items-center justify-center shadow-sm"
-                  style={{
-                    transform: `scale(${Math.max(0.85, Math.min(1.3, safeDeskScale))})`,
-                  }}
-                >
-                  {deskNumber}
-                </span>
-              </div>
-            )}
+                  {/* Số thứ tự bàn nằm trong hình tròn nhỏ ở 1 góc bàn */}
+                  <span
+                    className="absolute top-[14%] left-[7%] w-4 h-4 rounded-full bg-amber-950/90 border border-amber-300/90 text-amber-200 font-mono font-extrabold text-[8.5px] leading-none flex items-center justify-center shadow-sm"
+                    style={{
+                      transform: `scale(${Math.max(
+                        0.85,
+                        Math.min(1.3, safeDeskScale)
+                      )})`,
+                    }}
+                  >
+                    {deskNumber}
+                  </span>
+                </div>
+              ) : (
+                <div className="relative w-full h-full">
+                  <svg
+                    viewBox="0 0 100 46"
+                    className="w-full h-full overflow-visible drop-shadow-sm"
+                  >
+                    <rect
+                      x="6"
+                      y="26"
+                      width="88"
+                      height="9"
+                      rx="2.5"
+                      fill="#78350f"
+                      stroke="#451a03"
+                      strokeWidth="1.2"
+                    />
+                    <rect
+                      x="10"
+                      y="34"
+                      width="4"
+                      height="8"
+                      rx="1"
+                      fill="#292524"
+                    />
+                    <rect
+                      x="86"
+                      y="34"
+                      width="4"
+                      height="8"
+                      rx="1"
+                      fill="#292524"
+                    />
+                    <rect
+                      x="4"
+                      y="18"
+                      width="4.5"
+                      height="22"
+                      rx="1"
+                      fill="#334155"
+                    />
+                    <rect
+                      x="91.5"
+                      y="18"
+                      width="4.5"
+                      height="22"
+                      rx="1"
+                      fill="#334155"
+                    />
+                    <rect
+                      x="5"
+                      y="13"
+                      width="90"
+                      height="11"
+                      rx="1.5"
+                      fill="#92400e"
+                      stroke="#451a03"
+                      strokeWidth="1.2"
+                    />
+                    <polygon
+                      points="2,14 98,14 93,2 7,2"
+                      fill="#d97706"
+                      stroke="#78350f"
+                      strokeWidth="1.5"
+                    />
+                  </svg>
+                  {/* Số thứ tự bàn nằm trong hình tròn nhỏ ở 1 góc bàn */}
+                  <span
+                    className="absolute top-[6%] left-[7%] w-4 h-4 rounded-full bg-amber-950/90 border border-amber-300/90 text-amber-200 font-mono font-extrabold text-[8.5px] leading-none flex items-center justify-center shadow-sm"
+                    style={{
+                      transform: `scale(${Math.max(
+                        0.85,
+                        Math.min(1.3, safeDeskScale)
+                      )})`,
+                    }}
+                  >
+                    {deskNumber}
+                  </span>
+                </div>
+              )}
 
-            {/* Con mèo rơi lên bàn (hỗ trợ nuôi tối đa maxDeskCats con trên bàn) */}
-            {(() => {
-              const maxCats = Math.max(
-                1,
-                Math.min(5, giftModelScales?.maxDeskCats ?? 5)
-              );
-              const rawLeftCats = leftOccupant?.hasDeskCat
-                ? Math.max(1, leftOccupant.deskCatCount || 1)
-                : 0;
-              const rawRightCats = rightOccupant?.hasDeskCat
-                ? Math.max(1, rightOccupant.deskCatCount || 1)
-                : 0;
-              const effectiveLeftCats = Math.min(maxCats, rawLeftCats);
-              const effectiveRightCats = Math.min(
-                Math.max(0, maxCats - effectiveLeftCats),
-                rawRightCats
-              );
+              {/* Chia bàn thành 2 phần bằng nhau (Nửa Trái 0%..50% cho bạn ngồi trái, Nửa Phải 50%..100% đối xứng cho bạn ngồi phải) */}
+              {/* 1. Con mèo trên bàn: Bạn ngồi trái đặt bên nửa bàn trái, bạn ngồi phải đặt đối xứng bên nửa bàn phải */}
+              {(() => {
+                const maxCats = Math.max(
+                  1,
+                  Math.min(5, giftModelScales?.maxDeskCats ?? 5)
+                );
+                const rawLeftCats = leftOccupant?.hasDeskCat
+                  ? Math.max(1, leftOccupant.deskCatCount || 1)
+                  : 0;
+                const rawRightCats = rightOccupant?.hasDeskCat
+                  ? Math.max(1, rightOccupant.deskCatCount || 1)
+                  : 0;
+                const effectiveLeftCats = Math.min(maxCats, rawLeftCats);
+                const effectiveRightCats = Math.min(maxCats, rawRightCats);
+                const leftStepPct =
+                  effectiveLeftCats <= 1
+                    ? 0
+                    : Math.min(8.5, 32 / (effectiveLeftCats - 1));
+                const rightStepPct =
+                  effectiveRightCats <= 1
+                    ? 0
+                    : Math.min(8.5, 32 / (effectiveRightCats - 1));
 
-              return (
-                <>
-                  {Array.from({ length: effectiveLeftCats }, (_, idx) => (
-                    <div
-                      key={`cat_left_${idx}_${
-                        idx === effectiveLeftCats - 1
-                          ? leftOccupant?.deskCatDropAt || 1
-                          : idx
-                      }`}
-                      className="absolute z-20"
-                      style={{
-                        left: `${2 + idx * 17}%`,
-                        top: `${idx % 2 === 0 ? -6 : -11}%`,
-                        transform: `translate(${catOffsetX}px, ${catOffsetY}px)`,
-                      }}
-                    >
+                return (
+                  <>
+                    {Array.from({ length: effectiveLeftCats }, (_, idx) => (
                       <div
-                        className="animate-bounce"
-                        style={{ animationIterationCount: 2 }}
+                        key={`cat_left_${idx}_${
+                          idx === effectiveLeftCats - 1
+                            ? leftOccupant?.deskCatDropAt || 1
+                            : idx
+                        }`}
+                        className="absolute z-20"
+                        style={{
+                          left: `${6 + idx * leftStepPct}%`,
+                          top: `${idx % 2 === 0 ? -6 : -11}%`,
+                          transform: `translate(${catOffsetX}px, ${catOffsetY}px)`,
+                        }}
                       >
-                        <DeskCatModel
-                          customUrl={customAssets.deskCatUrl}
-                          scale={catScale}
-                        />
+                        <div
+                          className="animate-bounce"
+                          style={{ animationIterationCount: 2 }}
+                        >
+                          <DeskCatModel
+                            customUrl={customAssets.deskCatUrl}
+                            scale={catScale}
+                          />
+                        </div>
                       </div>
-                    </div>
-                  ))}
-                  {Array.from({ length: effectiveRightCats }, (_, idx) => (
-                    <div
-                      key={`cat_right_${idx}_${
-                        idx === effectiveRightCats - 1
-                          ? rightOccupant?.deskCatDropAt || 1
-                          : idx
-                      }`}
-                      className="absolute z-20"
-                      style={{
-                        right: `${2 + idx * 17}%`,
-                        top: `${idx % 2 === 0 ? -6 : -11}%`,
-                        transform: `translate(${catOffsetX}px, ${catOffsetY}px)`,
-                      }}
-                    >
+                    ))}
+                    {Array.from({ length: effectiveRightCats }, (_, idx) => (
                       <div
-                        className="animate-bounce"
-                        style={{ animationIterationCount: 2 }}
+                        key={`cat_right_${idx}_${
+                          idx === effectiveRightCats - 1
+                            ? rightOccupant?.deskCatDropAt || 1
+                            : idx
+                        }`}
+                        className="absolute z-20"
+                        style={{
+                          right: `${6 + idx * rightStepPct}%`,
+                          top: `${idx % 2 === 0 ? -6 : -11}%`,
+                          transform: `translate(${-catOffsetX}px, ${catOffsetY}px) scaleX(-1)`,
+                        }}
                       >
-                        <DeskCatModel
-                          customUrl={customAssets.deskCatUrl}
-                          scale={catScale}
-                        />
+                        <div
+                          className="animate-bounce"
+                          style={{ animationIterationCount: 2 }}
+                        >
+                          <DeskCatModel
+                            customUrl={customAssets.deskCatUrl}
+                            scale={catScale}
+                          />
+                        </div>
                       </div>
-                    </div>
-                  ))}
-                </>
-              );
-            })()}
+                    ))}
+                  </>
+                );
+              })()}
 
-            {/* Bịch snack rơi lên bàn: Ngồi bên trái -> sát cạnh bàn bên trái */}
-            {leftOccupant?.hasDeskSnack && (
-              <div
-                key={`snack_left_${leftOccupant.deskSnackDropAt || 1}`}
-                className="absolute left-[14%] top-[4%] z-20"
-                style={{
-                  transform: `translate(${snackOffsetX}px, ${snackOffsetY}px)`,
-                }}
-              >
+              {/* 2. Bịch bánh trên bàn: Ngồi bên trái -> nửa bàn trái (left 16%), Ngồi bên phải -> đối xứng nửa bàn phải (right 16%) */}
+              {leftOccupant?.hasDeskSnack && (
                 <div
-                  className="animate-bounce"
-                  style={{ animationIterationCount: 2 }}
+                  key={`snack_left_${leftOccupant.deskSnackDropAt || 1}`}
+                  className="absolute left-[16%] top-[4%] z-20"
+                  style={{
+                    transform: `translate(-50%, 0) translate(${snackOffsetX}px, ${snackOffsetY}px)`,
+                  }}
                 >
-                  <SnackBagModel
-                    customUrl={customAssets.snackBagUrl}
-                    scale={snackScale}
-                  />
+                  <div
+                    className="animate-bounce"
+                    style={{ animationIterationCount: 2 }}
+                  >
+                    <SnackBagModel
+                      customUrl={customAssets.snackBagUrl}
+                      scale={snackScale}
+                    />
+                  </div>
                 </div>
-              </div>
-            )}
+              )}
 
-            {/* Bịch snack rơi lên bàn: Ngồi bên phải -> sát cạnh bàn bên phải */}
-            {rightOccupant?.hasDeskSnack && (
-              <div
-                key={`snack_right_${rightOccupant.deskSnackDropAt || 1}`}
-                className="absolute right-[14%] top-[4%] z-20"
-                style={{
-                  transform: `translate(${snackOffsetX}px, ${snackOffsetY}px)`,
-                }}
-              >
+              {rightOccupant?.hasDeskSnack && (
                 <div
-                  className="animate-bounce"
-                  style={{ animationIterationCount: 2 }}
+                  key={`snack_right_${rightOccupant.deskSnackDropAt || 1}`}
+                  className="absolute right-[16%] top-[4%] z-20"
+                  style={{
+                    transform: `translate(50%, 0) translate(${-snackOffsetX}px, ${snackOffsetY}px) scaleX(-1)`,
+                  }}
                 >
-                  <SnackBagModel
-                    customUrl={customAssets.snackBagUrl}
-                    scale={snackScale}
-                  />
+                  <div
+                    className="animate-bounce"
+                    style={{ animationIterationCount: 2 }}
+                  >
+                    <SnackBagModel
+                      customUrl={customAssets.snackBagUrl}
+                      scale={snackScale}
+                    />
+                  </div>
                 </div>
-              </div>
-            )}
+              )}
 
-            {/* Con heo rơi lên bàn sau khi tặng quà heo (max: 1 con trên bàn) */}
-            {(leftOccupant?.hasDeskPig || rightOccupant?.hasDeskPig) && (
-              <div
-                key={`pig_desk_${
-                  leftOccupant?.hasDeskPig
-                    ? `left_${leftOccupant.deskPigDropAt || 1}`
-                    : `right_${rightOccupant?.deskPigDropAt || 1}`
-                }`}
-                className={`absolute top-[-6%] z-20 ${
-                  leftOccupant?.hasDeskPig ? 'left-[8%]' : 'right-[8%]'
-                }`}
-              >
+              {/* 3. Con heo trên bàn: Ngồi bên trái -> nửa bàn trái (left 28%), Ngồi bên phải -> đối xứng nửa bàn phải (right 28%) */}
+              {leftOccupant?.hasDeskPig && (
                 <div
-                  className="animate-bounce"
-                  style={{ animationIterationCount: 2 }}
+                  key={`pig_desk_left_${leftOccupant.deskPigDropAt || 1}`}
+                  className="absolute left-[28%] top-[-6%] z-20"
+                  style={{
+                    transform: 'translate(-50%, 0)',
+                  }}
                 >
-                  <RunningPigModel
-                    customUrl={customAssets.runningPigUrl}
-                    facingLeft={Boolean(rightOccupant?.hasDeskPig)}
-                    scale={Math.max(
-                      0.4,
-                      Math.min(2.5, (giftModelScales?.runningPig ?? 1) * 0.82)
-                    )}
-                  />
+                  <div
+                    className="animate-bounce"
+                    style={{ animationIterationCount: 2 }}
+                  >
+                    <RunningPigModel
+                      customUrl={customAssets.runningPigUrl}
+                      facingLeft={false}
+                      scale={Math.max(
+                        0.4,
+                        Math.min(
+                          2.5,
+                          (giftModelScales?.runningPig ?? 1) * 0.82
+                        )
+                      )}
+                    />
+                  </div>
                 </div>
-              </div>
-            )}
-          </div>
-        );
-      })}
-    </div>
+              )}
+
+              {rightOccupant?.hasDeskPig && (
+                <div
+                  key={`pig_desk_right_${rightOccupant.deskPigDropAt || 1}`}
+                  className="absolute right-[28%] top-[-6%] z-20"
+                  style={{
+                    transform: 'translate(50%, 0)',
+                  }}
+                >
+                  <div
+                    className="animate-bounce"
+                    style={{ animationIterationCount: 2 }}
+                  >
+                    <RunningPigModel
+                      customUrl={customAssets.runningPigUrl}
+                      facingLeft={true}
+                      scale={Math.max(
+                        0.4,
+                        Math.min(
+                          2.5,
+                          (giftModelScales?.runningPig ?? 1) * 0.82
+                        )
+                      )}
+                    />
+                  </div>
+                </div>
+              )}
+            </div>
+          );
+        })}
+    </>
   );
 };

@@ -1117,18 +1117,20 @@ export const StageHud: React.FC<StageHudProps> = ({
           ) : showResultBoardView ? (
             /* LUỒNG 5 (Kết quả câu hỏi) & LUỒNG 6 (Bảng xếp hạng trong lớp 6 thẻ: 3s đầu Top 1-6, sau đó mỗi 2s lật trang) */
             <div className="flex flex-col h-full justify-between gap-1.5">
-              {/* Hàng trên cùng: Tiêu đề */}
+              {/* Hàng trên cùng: Tiêu đề (thu nhỏ 20%) */}
               <div
                 className="flex items-center justify-between gap-2 pb-1 shrink-0"
                 style={{
                   borderBottom: '1px dashed rgba(254, 240, 138, 0.35)',
                 }}
               >
-                <div className="flex items-center gap-1.5 min-w-0">
-                  <Trophy className="w-4 h-4 text-yellow-300 shrink-0" />
+                <div className="flex items-center gap-1 min-w-0">
+                  <Trophy className="w-3 h-3 text-yellow-300 shrink-0" />
                   <span
                     className="font-black tracking-wide text-yellow-300 uppercase truncate"
-                    style={{ fontSize: `${safeClassBoardFontSize + 1}px` }}
+                    style={{
+                      fontSize: `${Math.max(7.5, Math.round((safeClassBoardFontSize + 1) * 0.8 * 10) / 10)}px`,
+                    }}
                   >
                     {showTotalScoreBoard
                       ? 'Bảng xếp hạng trong lớp'
@@ -1136,8 +1138,8 @@ export const StageHud: React.FC<StageHudProps> = ({
                   </span>
                 </div>
 
-                <div className="flex items-center gap-1.5 shrink-0">
-                  <span className="px-1.5 py-0.5 rounded bg-emerald-500/25 border border-emerald-300/60 text-emerald-200 font-bold text-[9px]">
+                <div className="flex items-center gap-1 shrink-0">
+                  <span className="px-1 py-[1px] rounded bg-emerald-500/25 border border-emerald-300/60 text-emerald-200 font-bold text-[7.2px]">
                     {showTotalScoreBoard
                       ? 'Rank 1-10'
                       : `Đúng: ${boardWinners.length} bạn`}
@@ -1207,16 +1209,18 @@ export const StageHud: React.FC<StageHudProps> = ({
                   borderBottom: '1px dashed rgba(251, 113, 133, 0.45)',
                 }}
               >
-                <div className="flex items-center gap-1.5 min-w-0">
-                  <BellRing className="w-4 h-4 text-rose-300 animate-bounce shrink-0" />
+                <div className="flex items-center gap-1 min-w-0">
+                  <BellRing className="w-3 h-3 text-rose-300 animate-bounce shrink-0" />
                   <span
                     className="font-black tracking-wide text-rose-300 uppercase truncate"
-                    style={{ fontSize: `${safeClassBoardFontSize + 1}px` }}
+                    style={{
+                      fontSize: `${Math.max(7.5, Math.round((safeClassBoardFontSize + 1) * 0.8 * 10) / 10)}px`,
+                    }}
                   >
                     Thông Báo Phạt Đứng Bảng (1 Lượt)
                   </span>
                 </div>
-                <span className="px-2 py-0.5 rounded bg-amber-500/30 border border-amber-300 text-yellow-200 font-black text-[9px] shrink-0">
+                <span className="px-1.5 py-[1px] rounded bg-amber-500/30 border border-amber-300 text-yellow-200 font-black text-[7.2px] shrink-0">
                   BUFF NHÂN ĐIỂM x3 / x6 / x9
                 </span>
               </div>
@@ -1312,22 +1316,22 @@ export const StageHud: React.FC<StageHudProps> = ({
             </div>
           ) : activeEngine === 'english_quiz' ? (
             <>
-              {/* Header Bảng Lớp: Tiết Tiếng Anh + Đồng hồ */}
+              {/* Header Bảng Lớp: Tiết Tiếng Anh + Đồng hồ (thu nhỏ 20%) */}
               <div
                 className="flex items-center justify-between gap-2 pb-1 shrink-0"
                 style={{
                   borderBottom: '1px dashed rgba(254, 240, 138, 0.28)',
-                  fontSize: `${Math.max(8, safeClassBoardFontSize - 2)}px`,
+                  fontSize: `${Math.max(6.5, Math.round((safeClassBoardFontSize - 2) * 0.8 * 10) / 10)}px`,
                 }}
               >
-                <div className="flex items-center gap-1.5 min-w-0">
-                  <BookOpen className="w-3.5 h-3.5 text-amber-300 shrink-0" />
+                <div className="flex items-center gap-1 min-w-0">
+                  <BookOpen className="w-[11px] h-[11px] text-amber-300 shrink-0" />
                   <span className="font-extrabold tracking-wide text-amber-200 uppercase truncate">
                     Tiết Tiếng Anh • Câu #{qIdx + 1}/{totalQuizCount}
                   </span>
                   {Boolean(quizItem.luckyStars && quizItem.luckyStars >= 1) && (
                     <span
-                      className={`px-1.5 py-0.5 rounded font-mono font-black text-[9px] leading-none border flex items-center gap-0.5 shrink-0 ${
+                      className={`px-1 py-[1px] rounded font-mono font-black text-[7.2px] leading-none border flex items-center gap-0.5 shrink-0 ${
                         quizItem.luckyStars === 3
                           ? 'bg-gradient-to-r from-amber-500 via-yellow-300 to-rose-500 text-slate-950 border-yellow-200 shadow-[0_0_8px_rgba(250,204,21,0.85)]'
                           : quizItem.luckyStars === 2
@@ -1342,15 +1346,15 @@ export const StageHud: React.FC<StageHudProps> = ({
                   )}
                 </div>
 
-                <div className="flex items-center gap-1.5 shrink-0">
+                <div className="flex items-center gap-1 shrink-0">
                   {isAnswerFlashPhase || isLegacyRevealed ? (
-                    <span className="px-1.5 py-0.5 rounded bg-emerald-500/35 border border-emerald-300 text-emerald-100 font-extrabold text-[9.5px] flex items-center gap-1 animate-pulse">
-                      <Sparkles className="w-2.5 h-2.5 text-yellow-300" />
+                    <span className="px-1 py-[1px] rounded bg-emerald-500/35 border border-emerald-300 text-emerald-100 font-extrabold text-[7.6px] flex items-center gap-0.5 animate-pulse">
+                      <Sparkles className="w-2 h-2 text-yellow-300" />
                       ĐÁP ÁN
                     </span>
                   ) : isBoardRunning ? (
                     <span
-                      className={`px-1.5 py-0.5 rounded font-mono font-extrabold text-[10px] border ${
+                      className={`px-1 py-[1px] rounded font-mono font-extrabold text-[8px] border ${
                         remSec <= 5
                           ? 'bg-rose-500/35 border-rose-300 text-rose-200 animate-pulse'
                           : 'bg-amber-500/25 border-amber-300/70 text-amber-200'
@@ -1359,7 +1363,7 @@ export const StageHud: React.FC<StageHudProps> = ({
                       ⏱ {remSec}s
                     </span>
                   ) : (
-                    <span className="px-1.5 py-0.5 rounded bg-slate-900/70 border border-slate-600/80 text-stone-300 font-bold text-[9px]">
+                    <span className="px-1 py-[1px] rounded bg-slate-900/70 border border-slate-600/80 text-stone-300 font-bold text-[7.2px]">
                       TẠM DỪNG
                     </span>
                   )}

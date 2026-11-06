@@ -111,8 +111,15 @@ export const TeacherSprite: React.FC<TeacherSpriteProps> = ({
       ? Math.sin(monk.animTime * 9.5) * 3.8 * safeWobble
       : 0;
 
-  const headTopOffsetPx = Math.round(78 * finalScale) + 6;
-  const feetBottomOffsetPx = Math.round(9 * finalScale) + 2;
+  const uniformTeacherScale =
+    roleScale * (characterScale || 1) * individualTeacherScale;
+  const headTopOffsetPx = Math.round(78 * uniformTeacherScale) + 6;
+  const feetBottomOffsetPx = Math.round(9 * uniformTeacherScale) + 2;
+  const teacherBodyZIndex = Math.max(20, Math.round(monk.y));
+  const teacherNameTagZIndex =
+    showBubble || isSpeakingBubble
+      ? 20490
+      : 2000 + Math.max(14, Math.round(monk.y));
 
   return (
     <div
@@ -120,11 +127,6 @@ export const TeacherSprite: React.FC<TeacherSpriteProps> = ({
       style={{
         left: monk.x,
         top: monk.y,
-        zIndex: showBubble
-          ? 20500
-          : isSpeakingBubble
-          ? 18000
-          : Math.max(14, Math.floor(monk.y / 10)),
       }}
     >
       {/* CHATBOX CẢM ƠN NHẬN QUÀ CỦA CÔ GIÁO (CHỮ HỒNG, VIỀN HỒNG) & THẦY GIÁM THỊ (CHỮ XANH DƯƠNG, VIỀN XANH DƯƠNG) */}
@@ -135,7 +137,7 @@ export const TeacherSprite: React.FC<TeacherSpriteProps> = ({
             top: -headTopOffsetPx,
             transform: `translate(-50%, -100%) scale(${(effectiveBubbleScale || 1).toFixed(2)})`,
             transformOrigin: '50% 100%',
-            zIndex: 9999,
+            zIndex: 20500,
           }}
         >
           <div
@@ -170,8 +172,9 @@ export const TeacherSprite: React.FC<TeacherSpriteProps> = ({
 
       {/* KHỐI THÂN NHÂN VẬT CÔ GIÁO / THẦY GIÁM THỊ */}
       <div
-        className="pointer-events-none select-none"
+        className="relative pointer-events-none select-none"
         style={{
+          zIndex: teacherBodyZIndex,
           transform: `translate(-50%, -88%) scale(${finalScale.toFixed(3)}) ${
             walkWobbleDeg !== 0 ? `rotate(${walkWobbleDeg.toFixed(2)}deg)` : ''
           }`,
@@ -484,7 +487,7 @@ export const TeacherSprite: React.FC<TeacherSpriteProps> = ({
           top: feetBottomOffsetPx,
           transform: `translate(-50%, 0) scale(${(nameTagScale || 1).toFixed(2)})`,
           transformOrigin: '50% 0%',
-          zIndex: showBubble || isSpeakingBubble ? 9998 : 30,
+          zIndex: teacherNameTagZIndex,
         }}
       >
         <div

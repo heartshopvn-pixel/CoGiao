@@ -407,6 +407,7 @@ export const GameStage: React.FC<GameStageProps> = ({
     doorCrowd,
     monks,
     zombieEntity,
+    zombieProjectiles,
     cameraZoomScale: config.cameraZoomScale ?? 2.2,
     cameraSmoothSpeed: config.cameraSmoothSpeed ?? 4.5,
     cameraFocusOffsetX: config.cameraFocusOffsetX ?? 0,
@@ -426,6 +427,7 @@ export const GameStage: React.FC<GameStageProps> = ({
     doorCrowd,
     monks,
     zombieEntity,
+    zombieProjectiles,
     cameraZoomScale: config.cameraZoomScale ?? 2.2,
     cameraSmoothSpeed: config.cameraSmoothSpeed ?? 4.5,
     cameraFocusOffsetX: config.cameraFocusOffsetX ?? 0,
@@ -472,7 +474,49 @@ export const GameStage: React.FC<GameStageProps> = ({
       Math.min(3.4, st.cameraZoomScale || st.cameraFocus.customZoom || 2.25)
     );
 
-    if (focusRole === 'zombie' && st.zombieEntity?.visible) {
+    if (focusRole === 'projectile' && st.cameraFocus.projectileId) {
+      const targetProj =
+        st.zombieProjectiles.find(
+          (p) => p.id === st.cameraFocus.projectileId
+        ) ||
+        st.zombieProjectiles.find((p) => p.kind === 'desk_mate');
+      if (targetProj) {
+        const elapsed = Date.now() - targetProj.createdAt;
+        const p = Math.max(
+          0,
+          Math.min(1, elapsed / Math.max(120, targetProj.durationMs))
+        );
+        const curX =
+          targetProj.startX + (targetProj.targetX - targetProj.startX) * p;
+        const linearY =
+          targetProj.startY + (targetProj.targetY - targetProj.startY) * p;
+        const arcHeight =
+          targetProj.kind === 'desk_mate'
+            ? 95
+            : targetProj.kind === 'chair'
+            ? 75
+            : 50;
+        const curY = linearY - Math.sin(p * Math.PI) * arcHeight;
+
+        desiredZoom = unifiedZoom;
+        const minX = 270 / desiredZoom;
+        const maxX = 540 - 270 / desiredZoom;
+        const minY = 480 / desiredZoom;
+        const maxY = 960 - 480 / desiredZoom;
+        desiredX = Math.max(minX, Math.min(maxX, curX + offsetX));
+        desiredY = Math.max(minY, Math.min(maxY, curY + offsetY * 0.25));
+        activeTargetId = -9004;
+      } else if (st.zombieEntity?.visible) {
+        desiredZoom = unifiedZoom;
+        const minX = 270 / desiredZoom;
+        const maxX = 540 - 270 / desiredZoom;
+        const minY = 480 / desiredZoom;
+        const maxY = 960 - 480 / desiredZoom;
+        desiredX = Math.max(minX, Math.min(maxX, st.zombieEntity.x + offsetX));
+        desiredY = Math.max(minY, Math.min(maxY, st.zombieEntity.y + offsetY));
+        activeTargetId = -9001;
+      }
+    } else if (focusRole === 'zombie' && st.zombieEntity?.visible) {
       desiredZoom = unifiedZoom;
       const minX = 270 / desiredZoom;
       const maxX = 540 - 270 / desiredZoom;
@@ -1128,7 +1172,7 @@ export const GameStage: React.FC<GameStageProps> = ({
             transform: 'scale(1) translate(0px, 0px)',
           }}
         >
-          {/* Layer 1: High School Classroom Artwork & Double Desks */}
+          {/* Layer 1: High School Classroom Background Artwork */}
           <ClassroomArt
             vipSlots={vipSlots}
             normalSlots={normalSlots}
@@ -1139,6 +1183,7 @@ export const GameStage: React.FC<GameStageProps> = ({
             deskScale={config.deskScale ?? 1}
             studentDeskGap={config.studentDeskGap ?? 24}
             giftModelScales={config.giftModelScales}
+            renderLayer="background"
             latestAltarOffering={
               latestAltarOffering
                 ? {
@@ -1244,7 +1289,7 @@ export const GameStage: React.FC<GameStageProps> = ({
           )}
         </div>
 
-        {/* Lớp Nhân Vật Học Sinh & Giáo Viên luôn nằm trên layer Bảng Lớp (z-25 > classBoardBox z-20) */}
+        {/* Lớp Bàn Học, Học Sinh & Giáo Viên chung một mặt phẳng xếp lớp 2.5D Depth Y-Sorting (z-25 > classBoardBox z-20) */}
         <div
           ref={worldCameraTeacherOverlayRef}
           className="absolute inset-0 pointer-events-none z-25 will-change-transform"
@@ -1253,6 +1298,19 @@ export const GameStage: React.FC<GameStageProps> = ({
             transform: 'scale(1) translate(0px, 0px)',
           }}
         >
+          <ClassroomArt
+            vipSlots={vipSlots}
+            normalSlots={normalSlots}
+            pilgrims={pilgrims}
+            incenseBurner={config.incenseBurner}
+            offeringTrayPos={config.offeringTrayPos}
+            customAssets={customAssets}
+            deskScale={config.deskScale ?? 1}
+            studentDeskGap={config.studentDeskGap ?? 24}
+            giftModelScales={config.giftModelScales}
+            renderLayer="desks"
+          />
+
           {monks
             .filter(
               (m) =>
@@ -1399,7 +1457,7 @@ export const GameStage: React.FC<GameStageProps> = ({
                 transform: `translate(-50%, -80%) translateY(${
                   Math.abs(Math.sin(pig.animTime * 16)) * -4
                 }px)`,
-                zIndex: Math.max(40, Math.floor(pig.y) + 80),
+                zIndex: Math.max(25, Math.round(pig.y) + 4),
               }}
             >
               <RunningPigModel
@@ -1431,7 +1489,7 @@ export const GameStage: React.FC<GameStageProps> = ({
                   )}px) rotate(${wobbleDeg.toFixed(1)}deg) ${
                     cat.facingLeft ? 'scaleX(-1)' : ''
                   }`,
-                  zIndex: Math.max(42, Math.floor(cat.y) + 82),
+                  zIndex: Math.max(25, Math.round(cat.y) + 4),
                 }}
               >
                 <DeskCatModel
@@ -1545,6 +1603,9 @@ export const GameStage: React.FC<GameStageProps> = ({
               key={proj.id}
               proj={proj}
               customAssets={customAssets}
+              nameTagFontFamily={config.nameTagFontFamily}
+              nameTagScale={config.nameTagScale}
+              nameTagMaxChars={config.nameTagMaxChars}
             />
           ))}
 

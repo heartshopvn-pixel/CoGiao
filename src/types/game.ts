@@ -106,6 +106,11 @@ export interface ZombieProjectileFX {
   damage: number;
   attackerUsername?: string;
   username?: string;
+  seatmateName?: string;
+  seatmateAvatarUrl?: string | null;
+  seatmateAvatarColor?: string;
+  seatmateIsVip?: boolean;
+  seatmateIsGolden?: boolean;
 }
 
 export interface ZombieSpikyDamageFX {
@@ -283,6 +288,7 @@ export interface ClassBoardRuntimeState {
   showResultEngine?: boolean;
   seatUpdateTriggered?: boolean;
   idleChatTriggered?: boolean;
+  ttsFinishedAtElapsedMs?: number;
 }
 
 export type HudCycleAnimMode = 'slide_right' | 'fade';
@@ -393,6 +399,14 @@ export interface CustomAssetsConfig {
   milkTeaCupUrl?: string | null;
 }
 
+export type NpcSpeechCategory = 'idle' | 'question' | 'reply';
+
+export interface NpcSpeechCategoriesConfig {
+  idle: string[];
+  question: string[];
+  reply: string[];
+}
+
 export interface GameConfig {
   ttsEnabled: boolean;
   ttsVipOnly: boolean;
@@ -476,6 +490,7 @@ export interface GameConfig {
   lessonIdleChatDelaySec?: number;
   lessonIdleChatTexts?: string[];
   lessonAnswerTtsTemplate?: string;
+  lessonFlow4PostTtsDelaySec?: number;
   quizResultTtsEnabled?: boolean;
   quizResultTtsTemplate?: string;
   quizResultTtsTemplates?: string[];
@@ -522,6 +537,7 @@ export interface GameConfig {
   botVipPercent: number;
   npcCorrectAnswerPercent?: number;
   npcScatterChatDensity?: number;
+  npcSpeechCategories?: NpcSpeechCategoriesConfig;
   npcSpawnIntervalSec: number;
   npcPrayIntervalSec: number;
   prayDurationSec: number;
@@ -694,6 +710,8 @@ export interface PilgrimData {
   totalFlowersToThrow?: number;
   flowersThrownCount?: number;
   flowerBurstsDoneCount?: number;
+  pendingFlowerBonusPoints?: number;
+  flowerBonusAwarded?: boolean;
   lotusBurstUntil?: number;
   lotusBurstKey?: number;
   chatBubbleUntil?: number;
@@ -826,7 +844,8 @@ export interface CameraQueueItem {
 
 export interface CameraFocusState {
   pilgrimId: number | null;
-  focusRole?: 'zombie' | 'abbot' | 'senior_novice' | null;
+  focusRole?: 'zombie' | 'abbot' | 'senior_novice' | 'projectile' | null;
+  projectileId?: string | null;
   customZoom?: number;
   username?: string;
   reason?: CameraFocusReason;

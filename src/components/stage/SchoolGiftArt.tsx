@@ -240,7 +240,7 @@ export const PcGamingDeskModel: React.FC<{
   height?: number;
   className?: string;
 }> = ({ customUrl, scale = 1, width = 94, height = 56, className = '' }) => {
-  const s = Math.max(0.4, Math.min(2.5, scale || 1));
+  const s = Math.max(0.4, Math.min(3.5, scale || 1));
   const w = Math.round(width * s);
   const h = Math.round(height * s);
 

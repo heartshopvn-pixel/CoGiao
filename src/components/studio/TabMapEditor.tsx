@@ -1266,7 +1266,7 @@ export const TabMapEditor: React.FC<TabMapEditorProps> = React.memo(({
             <div className="p-2.5 rounded-lg bg-stone-950/90 border border-pink-500/45 space-y-2.5 shadow-sm">
               <div className="flex items-center justify-between gap-2">
                 <span className="text-[11px] font-extrabold text-pink-200 flex items-center gap-1.5">
-                  <span>🎁 Kích Thước & Vị Trí Model: Bó Hoa • Con Mèo • Bịch Bánh • Con Heo</span>
+                  <span>🎁 Kích Thước & Vị Trí Model: Hoa • Mèo • Bánh • Heo • Bàn PC Gaming</span>
                 </span>
                 <button
                   type="button"
@@ -1276,6 +1276,7 @@ export const TabMapEditor: React.FC<TabMapEditorProps> = React.memo(({
                       deskCat: 1.0,
                       snackBag: 1.0,
                       runningPig: 1.0,
+                      pcGamingDesk: 1.25,
                       deskCatOffsetX: 0,
                       deskCatOffsetY: 0,
                       snackBagOffsetX: 0,
@@ -1288,7 +1289,7 @@ export const TabMapEditor: React.FC<TabMapEditorProps> = React.memo(({
                 </button>
               </div>
 
-              {/* 4 thanh chỉnh kích thước (Bó hoa, Con mèo, Bịch bánh, Con heo) */}
+              {/* 5 thanh chỉnh kích thước (Bó hoa, Con mèo, Bịch bánh, Con heo, Skin Bàn PC Gaming) */}
               <div className="grid grid-cols-2 gap-2 text-[10.5px]">
                 <div className="p-2 rounded bg-stone-900/90 border border-stone-800">
                   <div className="flex justify-between text-pink-200 mb-0.5">
@@ -1367,6 +1368,26 @@ export const TabMapEditor: React.FC<TabMapEditorProps> = React.memo(({
                       patchGm({ runningPig: parseFloat(e.target.value) || 1 })
                     }
                     className="w-full accent-orange-400 h-1.5 bg-stone-800 rounded-lg cursor-pointer"
+                  />
+                </div>
+
+                <div className="col-span-2 p-2 rounded bg-cyan-950/25 border border-cyan-500/40">
+                  <div className="flex justify-between text-cyan-200 mb-0.5">
+                    <span className="font-semibold">💻 Size Skin Bàn PC Gaming (Đổi Skin Bàn)</span>
+                    <span className="font-mono font-bold text-cyan-300">
+                      {Math.round((gm.pcGamingDesk ?? 1.25) * 100)}%
+                    </span>
+                  </div>
+                  <input
+                    type="range"
+                    min={0.4}
+                    max={3.0}
+                    step={0.05}
+                    value={gm.pcGamingDesk ?? 1.25}
+                    onChange={(e) =>
+                      patchGm({ pcGamingDesk: parseFloat(e.target.value) || 1.25 })
+                    }
+                    className="w-full accent-cyan-400 h-1.5 bg-stone-800 rounded-lg cursor-pointer"
                   />
                 </div>
               </div>
@@ -2656,7 +2677,7 @@ export const TabMapEditor: React.FC<TabMapEditorProps> = React.memo(({
                     <input
                       type="range"
                       min={0.4}
-                      max={2.5}
+                      max={3.0}
                       step={0.05}
                       value={scaleVal}
                       onChange={(e) =>
@@ -2676,7 +2697,7 @@ export const TabMapEditor: React.FC<TabMapEditorProps> = React.memo(({
                           giftModelScales: {
                             ...currentScales,
                             [item.scaleKey]: Math.min(
-                              2.5,
+                              3.0,
                               Number((scaleVal + 0.1).toFixed(2))
                             ),
                           },

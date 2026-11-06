@@ -271,37 +271,45 @@ export const StudentSprite: React.FC<StudentSpriteProps> = ({
       pilgrim.state === 'walk_to_teacher_gift' ||
       pilgrim.state === 'throw_flower_at_teacher');
 
-  // Khi có bong bóng chat, Rich Kid nhảy trên bàn, hoặc đang đọc TTS -> đẩy toàn bộ nhân vật lên layer đầu tiên
+  // 2.5D Depth Y-Sorting: Thân nhân vật luôn giữ nguyên zIndex theo tọa độ độ sâu Y thực tế trong lớp học
+  // (bạn ngồi bàn sau Y lớn luôn đè lên bạn ngồi bàn trước Y nhỏ; khi chat/đọc TTS chỉ đẩy Thẻ tên & Bong bóng chat lên tầng nổi)
+  const depthY = isRichKidDancing ? effectiveBaseY + 2 : renderedY;
+  const bodyZIndex = Math.max(
+    22,
+    Math.round(depthY) + (isSeated || isAtDeskSeat ? 0 : 2)
+  );
+
+  // Tầng giao diện nổi (Thẻ tên, Bong bóng chat, Thẻ điểm, Huy hiệu): tách độc lập khỏi thân nhân vật
+  const baseUiZIndex = 2000 + Math.max(10, Math.round(effectiveBaseY));
   const activeBubblePriority = showChatBubble
     ? 10000 + Math.floor(((pilgrim.chatBubbleUntil || 0) % 100000) / 10)
     : 0;
-  const spriteZIndex = isSpeakingBubble
+  const chatBubbleZIndex = isSpeakingBubble
     ? 20000
-    : isRichKidDancing
-    ? 18000
+    : isPerformingGiftAction
+    ? 18500
+    : Math.max(baseUiZIndex + 50, activeBubblePriority);
+  const nameTagZIndex = isSpeakingBubble
+    ? 19990
+    : isPerformingGiftAction
+    ? 18490
     : showChatBubble
-    ? activeBubblePriority
-    : showScoreCard || showFloatingScore || showComboBadge
-    ? 9800
-    : showQuizResultBadge
-    ? 9500
-    : showPunishmentBadge
-    ? 9200
-    : isSeated || isAtDeskSeat
-    ? Math.max(10, Math.floor(renderedY))
-    : Math.max(20, Math.floor(renderedY) + 60);
+    ? Math.max(baseUiZIndex + 40, activeBubblePriority - 1)
+    : showScoreCard
+    ? 9850 + Math.round(effectiveBaseY / 10)
+    : baseUiZIndex;
+  const badgeUiZIndex = 9400 + Math.round(effectiveBaseY);
 
   const hairColors = ['#1e293b', '#0f172a', '#3f2e21', '#27272a', '#451a03'];
   const hairColor = hairColors[pilgrim.hairSeed % hairColors.length];
 
-  // Khoảng cách thực tế từ tâm chân (anchor 88%) tới đỉnh đầu và mũi chân theo tỉ lệ nhân vật (50% -> 300%)
-  const headTopOffsetPx =
-    Math.round((isHoldingGiftUp ? 98 : isRaisingHand ? 76 : 71) * finalScale) + 6;
-  const quizBadgeTopOffsetPx = Math.round(72 * finalScale) + 6;
-  const wrongBadgeCenterOffsetPx = Math.round(40 * finalScale);
-  // Đồng bộ vị trí chân cố định cho cả trạng thái ngồi và bước ngang vào bàn để thẻ tên 2 bạn cùng bàn không bị lệch
-  const feetBottomOffsetPx =
-    Math.round((isSeated || isAtDeskSeat ? 5 : 9) * finalScale) + 2;
+  // Khoảng cách cố định đồng nhất cho MỌI học sinh dựa trên characterScale trong Dev (không phụ thuộc depthScale theo hàng Y hay động tác giơ tay/cầm quà)
+  // đảm bảo vị trí Thẻ tên, Bong bóng chat và Thẻ số điểm của tất cả học sinh luôn đồng nhất tuyệt đối theo đúng thông số Dev
+  const uniformCharScale = characterScale || 1;
+  const headTopOffsetPx = Math.round(72 * uniformCharScale) + 6;
+  const quizBadgeTopOffsetPx = Math.round(72 * uniformCharScale) + 6;
+  const wrongBadgeCenterOffsetPx = Math.round(40 * uniformCharScale);
+  const feetBottomOffsetPx = Math.round(6 * uniformCharScale) + 2;
 
   const safeMaxNameChars = Math.max(
     3,
@@ -342,13 +350,12 @@ export const StudentSprite: React.FC<StudentSpriteProps> = ({
       style={{
         left: pilgrim.x,
         top: renderedY,
-        zIndex: spriteZIndex,
       }}
     >
       {/* THẺ BUFF NHÂN ĐIỂM KHI BỊ PHẠT ĐỨNG TRÊN BỤC (x3 / x6 / x9) */}
       {showPunishmentBadge && (
         <div
-          className="absolute left-0 pointer-events-none z-92"
+          className="absolute left-0 pointer-events-none"
           style={{
             top: -(
               quizBadgeTopOffsetPx +
@@ -356,6 +363,7 @@ export const StudentSprite: React.FC<StudentSpriteProps> = ({
               (showComboBadge ? 22 : 0)
             ),
             transform: 'translate(-50%, -100%)',
+            zIndex: badgeUiZIndex,
           }}
         >
           <div
@@ -377,10 +385,11 @@ export const StudentSprite: React.FC<StudentSpriteProps> = ({
       {showComboBadge && (
         <div
           key={`combo_${pilgrim.comboPopKey || pilgrim.comboCount || 2}`}
-          className="absolute left-0 pointer-events-none z-96"
+          className="absolute left-0 pointer-events-none"
           style={{
             top: -Math.round(36 * finalScale),
             transform: 'translate(-50%, -50%)',
+            zIndex: badgeUiZIndex + 30,
           }}
         >
           <div
@@ -400,10 +409,11 @@ export const StudentSprite: React.FC<StudentSpriteProps> = ({
       {showFloatingScore && (
         <div
           key={`fscore_${pilgrim.floatingScoreKey || 1}`}
-          className="absolute left-0 pointer-events-none z-95 animate-bounce"
+          className="absolute left-0 pointer-events-none animate-bounce"
           style={{
             top: -(quizBadgeTopOffsetPx + 4),
             transform: 'translate(-50%, -100%)',
+            zIndex: badgeUiZIndex + 20,
           }}
         >
           <div
@@ -429,10 +439,11 @@ export const StudentSprite: React.FC<StudentSpriteProps> = ({
 
       {showQuizResultBadge && pilgrim.quizResultStatus === 'wrong' && (
         <div
-          className="absolute left-0 pointer-events-none z-90"
+          className="absolute left-0 pointer-events-none"
           style={{
             top: -wrongBadgeCenterOffsetPx,
             transform: 'translate(-50%, -50%)',
+            zIndex: badgeUiZIndex + 10,
           }}
         >
           <div
@@ -451,13 +462,15 @@ export const StudentSprite: React.FC<StudentSpriteProps> = ({
         </div>
       )}
 
-      {/* BONG BÓNG CHAT PHÁT BIỂU (Tự động nhận diện ghế ngồi: bên trái đẩy sang trái, bên phải đẩy sang phải để không đè lên nhau) */}
+      {/* BONG BÓNG CHAT PHÁT BIỂU (Đồng nhất tâm ngang -50% với Thẻ tên, chỉ dịch ngang đúng bằng số pixel chatBubbleOffsetX trong Dev) */}
       {showChatBubble && (() => {
-        const bubbleTranslateX = isSeated ? (isLeftSeatmate ? '-80%' : '-20%') : '-50%';
-        const bubbleOrigin = isSeated ? (isLeftSeatmate ? '80% 100%' : '20% 100%') : '50% 100%';
-        const tailLeftPercent = isSeated ? (isLeftSeatmate ? '80%' : '20%') : '50%';
-        const spreadPx = Number(chatBubbleOffsetX ?? 24);
-        const horizontalShiftPx = isSeated ? (isLeftSeatmate ? -spreadPx : spreadPx) : 0;
+        const spreadPx = Number(chatBubbleOffsetX ?? 0);
+        const horizontalShiftPx =
+          Boolean(pilgrim.slotId) && isAtDeskSeat
+            ? isLeftSeatmate
+              ? -spreadPx
+              : spreadPx
+            : 0;
 
         return (
           <div
@@ -465,9 +478,9 @@ export const StudentSprite: React.FC<StudentSpriteProps> = ({
             style={{
               left: horizontalShiftPx,
               top: -headTopOffsetPx + (chatBubbleOffsetY || 0),
-              transform: `translate(${bubbleTranslateX}, -100%) scale(${(chatBubbleScale || 1).toFixed(2)})`,
-              transformOrigin: bubbleOrigin,
-              zIndex: 9999,
+              transform: `translate(-50%, -100%) scale(${(chatBubbleScale || 1).toFixed(2)})`,
+              transformOrigin: '50% 100%',
+              zIndex: chatBubbleZIndex,
             }}
           >
             <div
@@ -509,7 +522,7 @@ export const StudentSprite: React.FC<StudentSpriteProps> = ({
                     : 'border-sky-400/80'
                 }`}
                 style={{
-                  left: tailLeftPercent,
+                  left: '50%',
                   transform: 'translateX(-50%) rotate(45deg)',
                 }}
               />
@@ -518,10 +531,11 @@ export const StudentSprite: React.FC<StudentSpriteProps> = ({
         );
       })()}
 
-      {/* KHỐI THÂN NHÂN VẬT HỌC SINH (Phóng to / thu nhỏ 50% -> 300% quanh tâm chân 50% 88%) */}
+      {/* KHỐI THÂN NHÂN VẬT HỌC SINH (Phóng to / thu nhỏ 50% -> 300% quanh tâm chân 50% 88%, giữ nguyên zIndex theo độ sâu Y) */}
       <div
-        className="pointer-events-none select-none"
+        className="relative pointer-events-none select-none"
         style={{
+          zIndex: bodyZIndex,
           transform: `translate(-50%, ${
             isRichKidDancing
               ? `${-88 - Math.abs(Math.sin(pilgrim.animTime * 14)) * 12}%`
@@ -536,18 +550,6 @@ export const StudentSprite: React.FC<StudentSpriteProps> = ({
           transformOrigin: '50% 88%',
         }}
       >
-        {/* Vòng sáng chân cho Học sinh VIP / Tặng quà / Rich Kid */}
-        {(pilgrim.isVip || pilgrim.hasGoldenAura || isRichKidDancing) && (
-          <div
-            className={`absolute left-1/2 bottom-1 -translate-x-1/2 rounded-full pointer-events-none ${
-              isRichKidDancing
-                ? 'w-16 h-6 bg-yellow-400/50 border-2 border-yellow-200 shadow-[0_0_20px_rgba(250,204,21,0.95)] animate-pulse'
-                : pilgrim.hasGoldenAura
-                ? 'w-14 h-5 bg-amber-400/35 border border-amber-300/80 shadow-[0_0_14px_rgba(251,191,36,0.75)]'
-                : 'w-11 h-4 bg-amber-400/20 border border-amber-300/50'
-            }`}
-          />
-        )}
 
         {/* Quà tặng / Bó hoa hồng ôm trước ngực (giữa nhân vật) khi học sinh đang đi tặng Cô Giáo / Thầy Giám Thị */}
         {isHoldingGiftUp && pilgrim.state !== 'throw_flower_at_teacher' && (
@@ -894,59 +896,43 @@ export const StudentSprite: React.FC<StudentSpriteProps> = ({
           top: feetBottomOffsetPx + (nameTagOffsetY || 0),
           transform: `translate(-50%, 0) scale(${(nameTagScale || 1).toFixed(2)})`,
           transformOrigin: '50% 0%',
-          zIndex:
-            showChatBubble || isSpeakingBubble
-              ? 9998
-              : showScoreCard
-              ? 9850
-              : 30,
+          zIndex: nameTagZIndex,
         }}
       >
         <div className="relative flex flex-col items-center">
-          {/* Hàng Icon Hiệu Ứng Nhỏ (Buff Khiên & Buff Combo Câu Đúng Liên Tiếp) nằm absolute ngay trên thẻ tên:
-              Học sinh ngồi bên trái bàn -> căn trái (left-0), ngồi bên phải bàn -> căn phải (right-0) */}
-          {(pilgrim.hasShield ||
-            (Boolean(pilgrim.slotId) && (pilgrim.correctStreak || 0) >= 2)) && (
-            <div
-              className={`absolute bottom-full mb-0.5 flex items-center gap-0.5 whitespace-nowrap ${
-                pilgrim.slotId
-                  ? isLeftSeatmate
-                    ? 'left-0 justify-start'
-                    : 'right-0 justify-end'
-                  : 'left-1/2 -translate-x-1/2 justify-center'
-              }`}
-            >
-              {pilgrim.hasShield && (
-                <div className="inline-flex items-center rounded bg-slate-950/90 border border-cyan-400/85 shadow-sm overflow-hidden">
-                  <span className="px-0.5 py-0.2 bg-cyan-500/25 text-[8.5px] leading-none flex items-center justify-center">
-                    🛡️
-                  </span>
-                  <span className="px-1 py-0.2 text-[7.5px] font-extrabold text-cyan-200 leading-none tracking-tight">
-                    Khiên
-                  </span>
-                </div>
-              )}
+          {/* Hàng Icon Hiệu Ứng Nhỏ (Buff Khiên & Buff Combo Câu Đúng Liên Tiếp):
+              Chỉ hiện khi không đang bật Thẻ Show Số Điểm (hoặc đặt lệch lên trên Thẻ Điểm) để KHÔNG làm dịch vị trí Thẻ Show Số Điểm so với Thẻ Tên */}
+          {!showScoreCard &&
+            (pilgrim.hasShield ||
+              (Boolean(pilgrim.slotId) && (pilgrim.correctStreak || 0) >= 2)) && (
+              <div className="absolute bottom-full mb-0.5 left-1/2 -translate-x-1/2 flex items-center justify-center gap-0.5 whitespace-nowrap">
+                {pilgrim.hasShield && (
+                  <div className="inline-flex items-center rounded bg-slate-950/90 border border-cyan-400/85 shadow-sm overflow-hidden">
+                    <span className="px-0.5 py-0.2 bg-cyan-500/25 text-[8.5px] leading-none flex items-center justify-center">
+                      🛡️
+                    </span>
+                    <span className="px-1 py-0.2 text-[7.5px] font-extrabold text-cyan-200 leading-none tracking-tight">
+                      Khiên
+                    </span>
+                  </div>
+                )}
 
-              {Boolean(pilgrim.slotId) && (pilgrim.correctStreak || 0) >= 2 && (
-                <div className="inline-flex items-center rounded bg-slate-950/90 border border-amber-400/85 shadow-sm overflow-hidden">
-                  <span className="px-0.5 py-0.2 bg-amber-500/25 text-[8.5px] leading-none flex items-center justify-center">
-                    🔥
-                  </span>
-                  <span className="px-1 py-0.2 text-[7.5px] font-extrabold text-amber-200 font-mono leading-none tracking-tight">
-                    x{pilgrim.correctStreak}
-                  </span>
-                </div>
-              )}
-            </div>
-          )}
+                {Boolean(pilgrim.slotId) && (pilgrim.correctStreak || 0) >= 2 && (
+                  <div className="inline-flex items-center rounded bg-slate-950/90 border border-amber-400/85 shadow-sm overflow-hidden">
+                    <span className="px-0.5 py-0.2 bg-amber-500/25 text-[8.5px] leading-none flex items-center justify-center">
+                      🔥
+                    </span>
+                    <span className="px-1 py-0.2 text-[7.5px] font-extrabold text-amber-200 font-mono leading-none tracking-tight">
+                      x{pilgrim.correctStreak}
+                    </span>
+                  </div>
+                )}
+              </div>
+            )}
 
           {/* THẺ SHOW SỐ ĐIỂM + SỐ ĐIỂM CỘNG/TRỪ (MÀU XANH LÁ / ĐỎ, VIỀN ĐEN ĐẬM, KHÔNG NỀN, TEXT RUN NHẸ)
-              Chỉ xuất hiện khi điểm của học sinh trong lớp thay đổi, nằm phía trên bảng tên */}
+              Vị trí cố định tuyệt đối cách Thẻ tên đúng 2px + scoreTagOffsetY trong Dev cho MỌI học sinh (không bao giờ bị đẩy lệch bởi icon buff) */}
           {showScoreCard && (() => {
-            const hasBuffIcons =
-              Boolean(pilgrim.hasShield) ||
-              (Boolean(pilgrim.slotId) && (pilgrim.correctStreak || 0) >= 2);
-            const baseClearancePx = hasBuffIcons ? 14 : 2;
             const totalScore = Math.max(
               0,
               Math.round(pilgrim.currentScoreDisplay ?? 0)
@@ -968,7 +954,7 @@ export const StudentSprite: React.FC<StudentSpriteProps> = ({
                 key={`scard_${pilgrim.scoreCardKey || 1}`}
                 className="absolute left-1/2 flex flex-col items-center pointer-events-none select-none z-50"
                 style={{
-                  bottom: `calc(100% + ${baseClearancePx}px)`,
+                  bottom: 'calc(100% + 2px)',
                   transform: `translate(-50%, ${scoreTagOffsetY || 0}px)`,
                 }}
               >

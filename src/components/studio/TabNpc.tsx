@@ -20,10 +20,12 @@ import {
   ClassBoardRuntimeState,
   ControlledNpcRole,
   GameConfig,
+  NpcSpeechCategory,
   PilgrimData,
   QueuedPilgrimRequest,
   WaitingQueueItem,
 } from '../../types/game';
+import { DEFAULT_NPC_SPEECH_CATEGORIES } from '../../config/constants';
 import { HostLiveTtsCard } from './HostLiveTtsCard';
 
 interface TabNpcProps {
@@ -95,9 +97,36 @@ export const TabNpc: React.FC<TabNpcProps> = ({
   const [editingNameIdx, setEditingNameIdx] = useState<number | null>(null);
   const [editingNameVal, setEditingNameVal] = useState('');
 
-  // Inline edit state for NPC Prayers
+  // Inline edit state for NPC Prayers (3 nhóm: Vu vơ / Hỏi / Trả lời)
+  const [activeSpeechCategory, setActiveSpeechCategory] =
+    useState<NpcSpeechCategory>('idle');
   const [editingPrayerIdx, setEditingPrayerIdx] = useState<number | null>(null);
   const [editingPrayerVal, setEditingPrayerVal] = useState('');
+
+  const speechCategories = config.npcSpeechCategories || DEFAULT_NPC_SPEECH_CATEGORIES;
+  const activeCategoryList =
+    speechCategories[activeSpeechCategory] ||
+    DEFAULT_NPC_SPEECH_CATEGORIES[activeSpeechCategory] ||
+    [];
+
+  const updateSpeechCategoryList = (
+    category: NpcSpeechCategory,
+    nextList: string[]
+  ) => {
+    const nextCategories = {
+      idle: speechCategories.idle || DEFAULT_NPC_SPEECH_CATEGORIES.idle,
+      question:
+        speechCategories.question || DEFAULT_NPC_SPEECH_CATEGORIES.question,
+      reply: speechCategories.reply || DEFAULT_NPC_SPEECH_CATEGORIES.reply,
+      [category]: nextList,
+    };
+    onUpdateConfig({ npcSpeechCategories: nextCategories });
+    onUpdateNpcPrayers([
+      ...nextCategories.idle,
+      ...nextCategories.question,
+      ...nextCategories.reply,
+    ]);
+  };
 
   // Name handlers
   const handleAddName = (e: React.FormEvent) => {
@@ -124,27 +153,33 @@ export const TabNpc: React.FC<TabNpcProps> = ({
     setEditingNameIdx(null);
   };
 
-  // Prayer handlers
+  // Prayer handlers (theo nhóm đang chọn: Vu vơ / Hỏi / Trả lời)
   const handleAddPrayer = (e: React.FormEvent) => {
     e.preventDefault();
     const val = newPrayerInput.trim();
     if (!val) return;
-    if (!npcPrayers.includes(val)) {
-      onUpdateNpcPrayers([val, ...npcPrayers]);
+    if (!activeCategoryList.includes(val)) {
+      updateSpeechCategoryList(activeSpeechCategory, [
+        val,
+        ...activeCategoryList,
+      ]);
     }
     setNewPrayerInput('');
   };
 
   const handleDeletePrayer = (idx: number) => {
-    onUpdateNpcPrayers(npcPrayers.filter((_, i) => i !== idx));
+    updateSpeechCategoryList(
+      activeSpeechCategory,
+      activeCategoryList.filter((_, i) => i !== idx)
+    );
   };
 
   const handleSaveEditPrayer = (idx: number) => {
     const val = editingPrayerVal.trim();
     if (val) {
-      const next = [...npcPrayers];
+      const next = [...activeCategoryList];
       next[idx] = val;
-      onUpdateNpcPrayers(next);
+      updateSpeechCategoryList(activeSpeechCategory, next);
     }
     setEditingPrayerIdx(null);
   };
@@ -587,34 +622,47 @@ export const TabNpc: React.FC<TabNpcProps> = ({
         </label>
       </div>
 
-      {/* 3. DANH SÁCH LỜI PHÁT BIỂU / COMMENT CỦA NPC */}
+      {/* 3. DANH SÁCH LỜI PHÁT BIỂU / COMMENT CỦA NPC (TÁCH 3 NHÓM: VU VƠ • HỎI • TRẢ LỜI) */}
       <div className="bg-stone-900/80 border border-stone-800 rounded-xl p-3 space-y-2.5">
         <div className="flex items-center justify-between gap-2 border-b border-stone-800 pb-2">
           <div className="flex items-center gap-2 min-w-0">
             <MessageSquare className="w-4 h-4 text-amber-400 shrink-0" />
             <h3 className="text-xs font-bold text-amber-300 truncate">
-              Danh Sách Phát Biểu / Comment NPC ({npcPrayers.length})
+              Danh Sách Phát Biểu NPC — 3 Nhóm (
+              {(speechCategories.idle?.length || 0) +
+                (speechCategories.question?.length || 0) +
+                (speechCategories.reply?.length || 0)}
+              )
             </h3>
           </div>
           <div className="flex items-center gap-1.5 shrink-0">
             <label
               className="text-[10px] font-bold text-emerald-200 hover:text-emerald-100 flex items-center gap-1 px-2 py-0.5 rounded bg-emerald-950/70 hover:bg-emerald-900/80 border border-emerald-500/40 cursor-pointer transition"
-              title="Tải file .txt (mỗi dòng 1 câu comment/cầu nguyện) để cập nhật danh sách"
+              title="Tải file .txt (mỗi dòng 1 câu) để cập nhật cho nhóm đang chọn"
             >
               <Upload className="w-3 h-3 text-emerald-400" />
-              <span>Cập nhật bằng file .txt</span>
+              <span>Nạp .txt vào nhóm này</span>
               <input
                 type="file"
                 accept=".txt,text/plain"
                 className="hidden"
-                onChange={(e) => handleUploadTxtList(e, onUpdateNpcPrayers)}
+                onChange={(e) =>
+                  handleUploadTxtList(e, (lines) =>
+                    updateSpeechCategoryList(activeSpeechCategory, lines)
+                  )
+                }
               />
             </label>
             <button
               type="button"
-              onClick={onResetNpcPrayers}
+              onClick={() => {
+                onUpdateConfig({
+                  npcSpeechCategories: DEFAULT_NPC_SPEECH_CATEGORIES,
+                });
+                onResetNpcPrayers();
+              }}
               className="text-[10px] text-amber-300/70 hover:text-amber-200 flex items-center gap-1 px-2 py-0.5 rounded bg-amber-950/50 border border-amber-500/20 cursor-pointer"
-              title="Khôi phục danh sách lời cầu nguyện mặc định"
+              title="Khôi phục cả 3 nhóm phát biểu mặc định"
             >
               <RotateCcw className="w-3 h-3" />
               Mặc định
@@ -622,17 +670,78 @@ export const TabNpc: React.FC<TabNpcProps> = ({
           </div>
         </div>
 
+        {/* Bộ chọn 3 Nhóm: Vu vơ / Hỏi / Trả lời */}
+        <div className="grid grid-cols-3 gap-1.5">
+          {(
+            [
+              {
+                key: 'idle' as NpcSpeechCategory,
+                label: '💭 1. Vu vơ',
+                count: speechCategories.idle?.length || 0,
+                activeClass:
+                  'bg-amber-500/25 border-amber-400 text-amber-200 shadow-sm',
+              },
+              {
+                key: 'question' as NpcSpeechCategory,
+                label: '❓ 2. Hỏi',
+                count: speechCategories.question?.length || 0,
+                activeClass:
+                  'bg-sky-500/25 border-sky-400 text-sky-200 shadow-sm',
+              },
+              {
+                key: 'reply' as NpcSpeechCategory,
+                label: '💬 3. Trả lời',
+                count: speechCategories.reply?.length || 0,
+                activeClass:
+                  'bg-emerald-500/25 border-emerald-400 text-emerald-200 shadow-sm',
+              },
+            ] as const
+          ).map((tab) => {
+            const isActive = activeSpeechCategory === tab.key;
+            return (
+              <button
+                key={tab.key}
+                type="button"
+                onClick={() => {
+                  setActiveSpeechCategory(tab.key);
+                  setEditingPrayerIdx(null);
+                }}
+                className={`px-2 py-1.5 rounded-lg border text-[11px] font-bold flex items-center justify-between gap-1 cursor-pointer transition ${
+                  isActive
+                    ? tab.activeClass
+                    : 'bg-stone-950/80 border-stone-800 text-stone-400 hover:text-stone-200 hover:bg-stone-900'
+                }`}
+              >
+                <span className="truncate">{tab.label}</span>
+                <span className="px-1.5 py-0.2 rounded bg-black/40 font-mono text-[10px]">
+                  {tab.count}
+                </span>
+              </button>
+            );
+          })}
+        </div>
+
+        <p className="text-[10px] text-stone-400 leading-snug">
+          💡 Khi rải chat: Hệ thống lấy ngẫu nhiên 1 trong 3 nhóm. Nếu bạn NPC vừa chat có <b className="text-emerald-300">bạn cùng bàn bên cạnh cũng là NPC</b>, lượt chat kế tiếp sẽ tự động đẩy cho bạn cùng bàn đó đáp lại bằng câu ngẫu nhiên trong nhóm <b className="text-emerald-300">💬 3. Trả lời</b>.
+        </p>
+
         <form onSubmit={handleAddPrayer} className="flex gap-1.5">
           <input
             type="text"
             value={newPrayerInput}
             onChange={(e) => setNewPrayerInput(e.target.value)}
-            placeholder="Thêm lời cầu nguyện mới..."
+            placeholder={
+              activeSpeechCategory === 'idle'
+                ? 'Thêm câu phát biểu vu vơ mới...'
+                : activeSpeechCategory === 'question'
+                ? 'Thêm câu hỏi mới...'
+                : 'Thêm câu trả lời (đáp lại bạn cùng bàn) mới...'
+            }
             className="flex-1 bg-black/50 border border-amber-500/30 rounded px-2.5 py-1.5 text-xs text-amber-100 placeholder:text-amber-200/35 focus:outline-none focus:border-amber-400"
           />
           <button
             type="submit"
-            className="px-3 py-1.5 rounded bg-amber-600 hover:bg-amber-500 text-black font-bold text-xs flex items-center gap-1 transition shrink-0"
+            className="px-3 py-1.5 rounded bg-amber-600 hover:bg-amber-500 text-black font-bold text-xs flex items-center gap-1 transition shrink-0 cursor-pointer"
           >
             <Plus className="w-3.5 h-3.5" />
             Thêm
@@ -640,9 +749,9 @@ export const TabNpc: React.FC<TabNpcProps> = ({
         </form>
 
         <div className="max-h-44 overflow-y-auto space-y-1 pr-1 custom-scrollbar">
-          {npcPrayers.map((prayer, idx) => (
+          {activeCategoryList.map((prayer, idx) => (
             <div
-              key={idx}
+              key={`${activeSpeechCategory}_${idx}`}
               className="flex items-center justify-between gap-1.5 bg-black/40 border border-amber-500/15 rounded px-2.5 py-1.5 text-xs group"
             >
               {editingPrayerIdx === idx ? (
