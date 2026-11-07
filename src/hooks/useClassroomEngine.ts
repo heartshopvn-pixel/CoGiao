@@ -19,6 +19,8 @@ import {
   SAMPLE_NAMES,
   SAMPLE_PRAYERS,
   SUPERVISOR_ZONE_BOUNDS,
+  ZOMBIE_PARTICIPANT_REWARD_POINTS,
+  ZOMBIE_TOP_REWARD_POINTS,
 } from '../config/constants';
 import { idbGet, idbSet } from '../services/browserStorage';
 import {
@@ -1446,6 +1448,10 @@ export function useClassroomEngine() {
             config.zombieGrowlMp3Url && config.zombieGrowlMp3Url.length > 10000
               ? null
               : config.zombieGrowlMp3Url,
+          zombieBgmMp3Url:
+            config.zombieBgmMp3Url && config.zombieBgmMp3Url.length > 10000
+              ? null
+              : config.zombieBgmMp3Url,
           giftSoundMp3Urls: {},
           bgmTracks: (config.bgmTracks || []).map((t) =>
             t.url && t.url.length > 10000 ? { ...t, url: '' } : t
@@ -2039,6 +2045,42 @@ export function useClassroomEngine() {
   }, []);
 
   // Kiểm tra câu trả lời Tiết Tiếng Anh trên Bảng Lớp khi có học sinh bình luận
+  // Kiểm tra (không gây tác dụng phụ) bình luận có phải đáp án ĐÚNG của câu hỏi đang mở trên Bảng Lớp hay không.
+  // Dùng để cho phép người xem chưa ở trong lớp / hàng chờ vẫn được tham gia trả lời và tự vào Hàng Chờ khi đúng.
+  const isCorrectQuizAnswerNow = useCallback((rawComment: string): boolean => {
+    const cfg = configRef.current;
+    if (cfg.hudLayout.showClassBoardBox === false) return false;
+    const bState = classBoardStateRef.current;
+    const activeEngine =
+      bState.engine || cfg.hudLayout.classBoardEngine || 'english_quiz';
+    if (activeEngine !== 'english_quiz' && activeEngine !== 'result_board') {
+      return false;
+    }
+    if (bState.phase !== 'asking') return false;
+
+    const quizList = getActiveQuizList(cfg);
+    const quizItem =
+      bState.currentQuestion ||
+      quizList[bState.questionIndex % quizList.length] ||
+      quizList[0];
+    if (!quizItem) return false;
+
+    const cleanText = (rawComment || '')
+      .toLowerCase()
+      .replace(/[^a-z0-9\s]/g, ' ')
+      .replace(/\s+/g, ' ')
+      .trim();
+    if (!cleanText) return false;
+
+    const targetWord = quizItem.en.toLowerCase().trim();
+    const words = cleanText.split(' ');
+    return (
+      words.includes(targetWord) ||
+      cleanText === targetWord ||
+      (targetWord === 'fridge' && words.includes('refrigerator'))
+    );
+  }, []);
+
   const checkEnglishQuizAnswer = useCallback(
     (
       username: string,
@@ -3761,12 +3803,24 @@ export function useClassroomEngine() {
 
       // Nếu là bình luận thường (coins <= 0, không phải forceAdmitFromQueue):
       // Bắt buộc phải có trong Lớp hoặc có trong Hàng Chờ (hoặc đang gõ "vào lớp"), nếu không thì bỏ qua hoàn toàn!
+      // NGOẠI LỆ: người xem chưa ở trong lớp / hàng chờ nhưng gõ ĐÚNG đáp án trong thời gian hỏi bài
+      // thì vẫn được chấm điểm và tự động đưa vào Hàng Chờ (không cần gõ "vào lớp").
+      const isOutsiderCorrectAnswer =
+        opts.coins <= 0 &&
+        !bypassWaitingQueue &&
+        !opts.isBot &&
+        !existingInClassNow &&
+        !isAlreadyInQueue &&
+        !isJoinCmd &&
+        isCorrectQuizAnswerNow(safeComment);
+
       if (
         opts.coins <= 0 &&
         !bypassWaitingQueue &&
         !existingInClassNow &&
         !isAlreadyInQueue &&
-        !isJoinCmd
+        !isJoinCmd &&
+        !isOutsiderCorrectAnswer
       ) {
         return false;
       }
@@ -3789,39 +3843,7 @@ export function useClassroomEngine() {
         );
       }
 
-      // 2. Chống spam lặp lại CÙNG 1 câu y hệt của CÙNG 1 NGƯỜI (nhưng cho phép comment nhiều câu trả lời khác nhau thoải mái trong 15s hỏi bài)
-      if (
-        opts.coins <= 0 &&
-        safeComment.trim() &&
-        !opts.isBot &&
-        !opts.isSimulatedTest &&
-        !bypassWaitingQueue &&
-        !genderCmd
-      ) {
-        const normComment = sanitizeAndLimitSpeechText(
-          safeComment,
-          cfg.maxTtsWords || 25
-        ).toLowerCase();
-        if (!normComment) return false;
-        const spamKey = `${lowerUser}:${normComment}`;
-        const now = Date.now();
-        for (const [k, t] of recentCommentsRef.current.entries()) {
-          if (now - t > 25000) recentCommentsRef.current.delete(k);
-        }
-        if (recentCommentsRef.current.size > 200) {
-          const oldestKey = recentCommentsRef.current.keys().next().value;
-          if (oldestKey) recentCommentsRef.current.delete(oldestKey);
-        }
-        const isAskingQuiz =
-          classBoardStateRef.current.isRunning &&
-          classBoardStateRef.current.phase === 'asking';
-        const cooldownMs = isAskingQuiz ? 1200 : 6000;
-        const prevTime = recentCommentsRef.current.get(spamKey);
-        if (prevTime && now - prevTime < cooldownMs) {
-          return false;
-        }
-        recentCommentsRef.current.set(spamKey, now);
-      }
+      // 2. (Đã bỏ chặn comment trùng lặp: học sinh gõ lại cùng 1 câu, kể cả "vào lớp", vẫn được xử lý bình thường)
 
       // Nếu gõ lệnh "vào lớp" khi chưa ở trong lớp -> đưa vào Hàng Chờ trước khi chấm câu trả lời / hiện chat box
       if (
@@ -3830,6 +3852,19 @@ export function useClassroomEngine() {
         !existingInClassNow &&
         isJoinCmd
       ) {
+        enqueueStudentToWaitingQueue({
+          username: safeName,
+          prayer: safeComment,
+          gender: resolveUserGender(safeName, genderCmd || opts.gender),
+          isVip: false,
+          coins: 0,
+          isBot: opts.isBot,
+          avatarUrl: opts.avatarUrl,
+        });
+      }
+
+      // Người ngoài trả lời đúng: đưa vào Hàng Chờ trước để được chấm điểm câu này
+      if (isOutsiderCorrectAnswer) {
         enqueueStudentToWaitingQueue({
           username: safeName,
           prayer: safeComment,
@@ -4171,6 +4206,7 @@ export function useClassroomEngine() {
     },
     [
       checkEnglishQuizAnswer,
+      isCorrectQuizAnswerNow,
       customWords,
       enqueueStudentToWaitingQueue,
       executeGiftPilgrimEntry,
@@ -7824,12 +7860,12 @@ export function useClassroomEngine() {
         const top3 = topList[2];
 
         // Cộng thưởng thực tế Hoa Điểm 10:
-        // - Top 1: +200đ, Top 2: +100đ, Top 3: +50đ
+        // - Top 1: +120đ, Top 2: +100đ, Top 3: +80đ (xem ZOMBIE_TOP_REWARD_POINTS)
         // - Tất cả các bạn còn lại (trừ 3 bạn đạt Top ra), cả trong lớp và trong hàng chờ: mỗi bạn +25đ
         const rewardEntries: Array<{ username: string; pts: number }> = [];
-        if (top1) rewardEntries.push({ username: top1.username, pts: 200 });
-        if (top2) rewardEntries.push({ username: top2.username, pts: 100 });
-        if (top3) rewardEntries.push({ username: top3.username, pts: 50 });
+        if (top1) rewardEntries.push({ username: top1.username, pts: ZOMBIE_TOP_REWARD_POINTS[0] });
+        if (top2) rewardEntries.push({ username: top2.username, pts: ZOMBIE_TOP_REWARD_POINTS[1] });
+        if (top3) rewardEntries.push({ username: top3.username, pts: ZOMBIE_TOP_REWARD_POINTS[2] });
 
         const top3LowerSet = new Set<string>(
           rewardEntries.map((r) => r.username.trim().toLowerCase())
@@ -7865,7 +7901,7 @@ export function useClassroomEngine() {
         });
 
         remainingUsersMap.forEach((uName) => {
-          rewardEntries.push({ username: uName, pts: 25 });
+          rewardEntries.push({ username: uName, pts: ZOMBIE_PARTICIPANT_REWARD_POINTS });
         });
 
         let updatedWaitingQueuePoints = false;
@@ -8101,6 +8137,91 @@ export function useClassroomEngine() {
     pushToast,
     recomputeWaitingQueueLazy,
   ]);
+
+  // Nhạc nền chiến đấu: phát suốt Sự kiện Zombie (Luồng 1 -> hạ gục), tự trả lại nhạc nền thường khi kết thúc
+  useEffect(() => {
+    const phase = zombieEventState.phase;
+    const inBattle =
+      zombieEventState.isActive &&
+      phase !== 'idle' &&
+      phase !== 'queued' &&
+      phase !== 'z_flow_6_celebration';
+    if (inBattle) {
+      soundEngine.startZombieBgm(configRef.current);
+    } else {
+      soundEngine.stopZombieBgm();
+    }
+  }, [zombieEventState.isActive, zombieEventState.phase]);
+
+  useEffect(() => {
+    return () => {
+      soundEngine.stopZombieBgm();
+    };
+  }, []);
+
+  // Thầy giáo (Thầy Tùng) nói câu khích lệ học sinh chiến đấu ở Luồng 5, lấy ngẫu nhiên từ danh sách trong Dev Âm Thanh
+  useEffect(() => {
+    if (
+      !zombieEventState.isActive ||
+      zombieEventState.phase !== 'z_flow_5_combat'
+    ) {
+      return;
+    }
+    let cancelled = false;
+    let timer: ReturnType<typeof setTimeout> | null = null;
+    let lastIdx = -1;
+
+    const speakCheer = () => {
+      const cfg = configRef.current;
+      const cur = zombieEventStateRef.current;
+      if (!cur.isActive || cur.phase !== 'z_flow_5_combat' || cur.hp <= 0) {
+        return;
+      }
+      if (cfg.zombieCheerEnabled === false) return;
+      const lines = (cfg.zombieCheerLines || [])
+        .map((l) => (l || '').trim())
+        .filter(Boolean);
+      if (lines.length === 0) return;
+
+      let idx = Math.floor(Math.random() * lines.length);
+      if (lines.length > 1 && idx === lastIdx) {
+        idx = (idx + 1 + Math.floor(Math.random() * (lines.length - 1))) % lines.length;
+      }
+      lastIdx = idx;
+      const line = lines[idx].replace(/\[Cấp\]/gi, String(cur.level));
+
+      const bubbleUntil = Date.now() + 5500;
+      setMonks((prevM) => {
+        const nextM = prevM.map((m) =>
+          m.role === 'senior_novice'
+            ? { ...m, chatText: line, chatBubbleUntil: bubbleUntil }
+            : m
+        );
+        monksRef.current = nextM;
+        return nextM;
+      });
+      soundEngine.enqueueTTS(line, false, cfg, {
+        reason: 'manual',
+        speakerRole: 'senior_novice',
+        lang: 'vi',
+      });
+    };
+
+    const scheduleNext = (delayMs: number) => {
+      timer = setTimeout(() => {
+        if (cancelled) return;
+        speakCheer();
+        const sec = Math.max(4, configRef.current.zombieCheerIntervalSec ?? 10);
+        scheduleNext(sec * 1000);
+      }, delayMs);
+    };
+    scheduleNext(3500);
+
+    return () => {
+      cancelled = true;
+      if (timer) clearTimeout(timer);
+    };
+  }, [zombieEventState.isActive, zombieEventState.phase]);
 
   // Tự động cho NPC trong lớp & hàng chờ phụ thả tim ném hộp bút vào Zombie khi đang ở Luồng 5 Chiến Đấu (nếu bật zombieNpcAutoAttack)
   useEffect(() => {
@@ -10398,8 +10519,15 @@ export function useClassroomEngine() {
   // Nút Test bắn đạn vào Zombie trong Dev-Event
   const handleTestZombieAttack = useCallback(
     (
-      kind: 'heart_seated' | 'heart_queue' | 'book' | 'chair' | 'desk_mate',
-      customUsername?: string
+      kind:
+        | 'heart_seated'
+        | 'heart_queue'
+        | 'book'
+        | 'chair'
+        | 'desk_mate'
+        | 'npc_heart',
+      customUsername?: string,
+      heartCount?: number
     ) => {
       if (
         !zombieEventStateRef.current.isActive ||
@@ -10409,6 +10537,40 @@ export function useClassroomEngine() {
           '⚠️ Hãy chờ tới Luồng 5 (Chiến đấu) của Sự kiện Zombie để test đòn tấn công!',
           false
         );
+        return;
+      }
+
+      // Test thả tim bằng 1 NPC ngẫu nhiên trong lớp hoặc hàng chờ, số tim = mốc ± ngẫu nhiên 3
+      if (kind === 'npc_heart') {
+        const base = Math.max(1, Math.round(heartCount || 10));
+        const jitter = Math.floor(Math.random() * 7) - 3; // -3 .. +3
+        const likes = Math.max(1, base + jitter);
+
+        const isSeatedNow = (p: { slotId?: unknown; state: string }) =>
+          Boolean(p.slotId) &&
+          p.state !== 'leave_side_to_aisle' &&
+          p.state !== 'leave_down_exit';
+        const seatedBots = pilgrimsRef.current
+          .filter((p) => p.isBot && isSeatedNow(p))
+          .map((p) => p.username);
+        const queuedBots = Array.from(waitingPoolRef.current.values())
+          .filter((q) => q.isBot)
+          .map((q) => q.username);
+        let candidates = [...seatedBots, ...queuedBots];
+        if (candidates.length === 0) {
+          // Chưa có NPC nào: dùng tạm bất kỳ ai đang trong lớp / hàng chờ
+          candidates = [
+            ...pilgrimsRef.current.filter(isSeatedNow).map((p) => p.username),
+            ...Array.from(waitingPoolRef.current.values()).map((q) => q.username),
+          ];
+        }
+        if (candidates.length === 0) {
+          pushToast('⚠️ Không có NPC nào trong lớp hoặc hàng chờ để thả tim!', false);
+          return;
+        }
+        const chosen = candidates[Math.floor(Math.random() * candidates.length)];
+        handleTriggerLike(likes, chosen, true);
+        pushToast(`❤️ NPC ${chosen} thả ${likes} tim (mốc ${base} ±3)`, false);
         return;
       }
 
